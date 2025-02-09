@@ -1,0 +1,12 @@
+defaults:
+    - default
+    - _self_
+
+input: null
+
+save_path: null
+seed: 42
+
+hydra:
+    run:
+        dir: ./results/singlerun/results/${now:%Y-%m-%d}/${now:%H-%M-%S}

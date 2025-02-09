@@ -1,0 +1,10 @@
+defaults:
+  - default
+  - cd
+  - _self_
+
+name: "ensemble_spec"
+gamma: 5
+
+llm:
+  num_speculative_tokens: ${..gamma}

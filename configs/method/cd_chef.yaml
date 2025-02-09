@@ -1,0 +1,6 @@
+defaults:
+  - default
+  - cd_sd
+  - _self_
+
+name: "chef"

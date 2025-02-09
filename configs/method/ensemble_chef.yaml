@@ -1,0 +1,8 @@
+defaults:
+  - default
+  - ensemble_sd
+  - _self_
+
+name: "chef"
+
+gamma: null # should be a list of integers
