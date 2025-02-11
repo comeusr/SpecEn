@@ -2,7 +2,6 @@ defaults:
   - default
   - _self_
 
-name: ensemble
 
 extra_model: null
 lambda: null
@@ -10,6 +9,5 @@ lambda: null
 llm:
   model: ${path_join:${oc.env:MODEL_PATH},${..model}}
   extra_model: ${path_join:${oc.env:MODEL_PATH},${..extra_model}}
-  spec_decoding_acceptance_method: ${..name}
   ensemble_fn: ${eval:'lambda probs,logprobs:((1 - ${..lambda}) * probs[0] + ${..lambda} * probs[1], logprobs[0])'}
   ensemble_target: probs

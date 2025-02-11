@@ -3,11 +3,9 @@ defaults:
   - ensemble
   - _self_
 
-name: "ensemble_spec"
 
 # should be an integer, it applied to the last model given in extra_model
 gamma: null
 
 llm:
   num_speculative_tokens: ${..gamma}
-  spec_decoding_acceptance_method: ensemble_spec

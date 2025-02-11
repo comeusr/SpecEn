@@ -2,7 +2,5 @@ defaults:
   - default
   - _self_
 
-name: large_model
-
 llm:
   model: ${path_join:${oc.env:MODEL_PATH},${..model}}

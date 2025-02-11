@@ -15,7 +15,7 @@ def create_task(task_cfg, run_dir):
     log_path = f"{run_dir}/result.log"
     error_path = f"{run_dir}/error.log"
     command = (
-        ["nohup", "python", "./main_dataset.py", f"method={task_cfg.method.name}"]
+        ["nohup", "python", "./main_dataset.py", f"method={task_cfg.method.pop('name')}"]
         + flatten_dict(task_cfg)
         + [f"hydra.run.dir={run_dir}"]
     )

@@ -3,7 +3,6 @@ defaults:
   - cd
   - _self_
 
-name: "ensemble_spec"
 gamma: 5
 
 llm:

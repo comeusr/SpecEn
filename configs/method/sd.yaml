@@ -2,7 +2,6 @@ defaults:
   - default
   - _self_
 
-name: "sd"
 
 draft_model: null
 gamma: 5

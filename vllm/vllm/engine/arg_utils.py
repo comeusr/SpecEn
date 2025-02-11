@@ -1119,7 +1119,7 @@ class EngineArgs:
         ensemble_decoding_config = None
         chef_config = None
         print("Speculative Decoding Acceptance Method: ", self.spec_decoding_acceptance_method)
-        if self.spec_decoding_acceptance_method == "chef":
+        if self.num_speculative_tokens and self.ensemble_fn and self.ensemble_target:
             chef_config = ChefConfig.maybe_create_chef_config(
                 base_model_config=model_config,
                 base_parallel_config=parallel_config,
@@ -1135,9 +1135,7 @@ class EngineArgs:
                 disable_logprobs=self.disable_logprobs_during_spec_decoding,
                 disable_log_stats=self.disable_log_stats,
             )
-        elif self.spec_decoding_acceptance_method in [
-                "ensemble", "ensemble_spec"
-        ]:
+        elif self.ensemble_fn and self.ensemble_target:
             ensemble_decoding_config = EnsembleDecodingConfig.maybe_create_ensemble_config(
                 base_model_config=model_config,
                 base_parallel_config=parallel_config,
