@@ -10,7 +10,7 @@
 **Speculative Ensemble** is a novel framework that accelerates the ensemble of any number of LLMs without sacrificing performance. It could reach 1.11x-2.23x over standard ensemble techniques on two-model or three-model pairs.
 
 
-# Setup
+## Setup
 
 ```bash
 conda create -n vllm_specdec python=3.11 -y
@@ -24,7 +24,7 @@ cd ..
 pip install -r requirements.txt
 ```
 
-# How to run
+## How to run
 
 1. create a `.env` file to create (automatically) environment variable to root path of your models.
     ```bash
@@ -43,10 +43,10 @@ pip install -r requirements.txt
         method.generate.temperature=0 \
     ```
 
-# Code reading guides
-Chef is the internal codename for the speculative ensemble implementation. The code can be found at [`vllm/vllm/chef`](./vllm/vllm/chef/). For the baseline ensemble implementation, see [vllm/vllm/ensemble_decode](./vllm/vllm/ensemble_decode/).
+## Code reading guides
+**Chef** is the internal codename for the speculative ensemble implementation. The code can be found at [`vllm/vllm/chef`](./vllm/vllm/chef/). For the baseline ensemble implementation, see [vllm/vllm/ensemble_decode](./vllm/vllm/ensemble_decode/).
 
-We have implemented multiple model inference methods. The configuration files are located in [`configs/method`](./configs/method/), and the desired method can be specified via `method={method_name}` (see [Step 3](#how-to-run)). Annotations are as follows:
+We have implemented multiple model inference methods. The configuration files are located in [`configs/method`](./configs/method/), and the desired method can be specified via `method={method_name}` (see Step 2 of [How to run](#how-to-run)). Annotations are as follows:
 
 | Method | Description | Args Note |
 | :-----: | :-----: | :----: |
@@ -55,3 +55,14 @@ We have implemented multiple model inference methods. The configuration files ar
 | `cd_sd` | Accelerates contrastive decoding directly using speculative decoding | Inherits from `cd`, with additional speculative decoding hyperparameter `method.gamma` |
 | `cd_chef` | Accelerates contrastive decoding via speculative ensemble | Inherits from `cd_sd` |
 | `ensemble_*` | Integrates models using `method.extra_model` (`str` or `list of str`) | Similar usage to `cd_*`. Modify `llm.ensemble_fn` and `llm.ensemble_target` in the YAML file to adjust the integration approach and objective. |
+
+## Citations
+
+```bib
+@article{fu2025speculative,
+  title={Speculative Ensemble: Fast Large Language Model Ensemble via Speculation},
+  author={Fu, Jiale and Jiang, Yuchu and Chen, Junkai and Fan, Jiaming and Geng, Xin and Yang, Xu},
+  journal={arXiv preprint arXiv:2502.01662},
+  year={2025}
+}
+```
