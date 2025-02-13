@@ -81,3 +81,7 @@ We have implemented multiple model inference methods. The configuration files ar
   year={2025}
 }
 ```
+
+## Acknowledgements
+
+We built our implementation upon the [VLLM](https://github.com/vllm-project/vllm) project and would like to thank the authors for their outstanding contributions.
