@@ -68,7 +68,7 @@ We have implemented multiple model inference methods. The configuration files ar
 
 ### Customizing a Dataset
 
-1. Create a directory `src/mydatasets/your_dataset/` and a file `src/mydatasets/your_dataset/mydataset.py` that follows the template in [`src/mydatasets/template.py`](./src/mydatasets//template.py).
+1. Create a directory `src/mydatasets/your_dataset/` and a file `src/mydatasets/your_dataset/mydataset.py` that inherits [`DatasetBase`](./src/mydatasets/dataset_base.py).
 2. Use `dataset=your_dataset` to run your custom dataset.
 
 ## Citation
