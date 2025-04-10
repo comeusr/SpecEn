@@ -1,50 +1,23 @@
+import os
 import re
-import pdb
-from jinja2 import Template
 from datasets import load_from_disk
+from src.mydatasets.dataset_base import DatasetBase
+from src.myutils.file import load_json
 
-from src.myutils.file import read_txt, load_json
 
+class MyDataset(DatasetBase):
+    def __init__(self, size="tiny", use_fewshot=False):
+        super().__init__(size=size, use_fewshot=use_fewshot)
+        self.dataset = load_from_disk(os.path.join(self.cls_abspath, "dataset"))["test"]
+        self.prefixs = load_json(
+            os.path.join(self.cls_abspath, "mmlu-cot-claude-single.json")
+        )
 
-class MyDataset:
-    def __init__(self, size=False, use_fewshot=False, dataset_name="mmlu"):
-        self.dataset_name = dataset_name
-        self.size = size
-        self.use_fewshot = use_fewshot
-        self.TINY_NUM = 5
-        self.SMALL_NUM = 200
-        self.init_dataset()
-
-    def init_dataset(self):
-        # init dataset
-        hf_dataset = load_from_disk(f"src/mydatasets/{self.dataset_name}/dataset")[
-            "test"
-        ]
-        if self.size == "tiny":
-            hf_dataset = hf_dataset.shuffle(seed=42).select(range(self.TINY_NUM))
-        elif self.size == "small":
-            hf_dataset = hf_dataset.shuffle(seed=42).select(range(self.SMALL_NUM))
-        elif isinstance(self.size, int):
-            hf_dataset = hf_dataset.shuffle(seed=42).select(range(self.size))
-        self.datas = hf_dataset
-        # generate prefixs
-        if self.use_fewshot:
-            self.prefixs = load_json(
-                f"src/mydatasets/{self.dataset_name}/{self.dataset_name}-cot-claude-single.json"
-            )
-
-    def get_prompts(self):
-        if self.use_fewshot:
-            template = Template(
-                read_txt(f"src/mydatasets/{self.dataset_name}/prompt_fewshot.txt")
-            )
-        else:
-            template = Template(
-                read_txt(f"src/mydatasets/{self.dataset_name}/prompt_zeroshot.txt")
-            )
+    @property
+    def prompts(self):
         prompts = []
-        for data in self.datas:
-            prompt = template.render(**self.modified_data(data))
+        for data in self.dataset:
+            prompt = self.prompt_template.render(**self.modified_data(data))
             if self.use_fewshot:
                 prefix = self.prefixs[data["subject"]]
                 prompt = f"{prefix}\n\n{prompt}"
@@ -57,7 +30,7 @@ class MyDataset:
         correct = 0
         for i, pred in enumerate(preds):
             ans_pred = self.find_answer(pred)
-            gold = choices[self.datas[i]["answer"]]
+            gold = choices[self.dataset[i]["answer"]]
             if ans_pred == gold:
                 correct += 1
         result = float(correct) / len(preds)
@@ -84,4 +57,4 @@ class MyDataset:
 
 
 if __name__ == "__main__":
-    dataset = MyDataset(tiny=True)
+    dataset = MyDataset(size="tiny")

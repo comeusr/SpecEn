@@ -145,7 +145,7 @@ def main(cfg: DictConfig):
     torch.manual_seed(cfg.seed)
 
     dataset = init_dataset(cfg)
-    prompts = dataset.get_prompts()
+    prompts = dataset.prompts
 
     llm = LLM(**cfg.method.llm)
     sampling_params = SamplingParams(seed=cfg.seed, **cfg.method.generate)

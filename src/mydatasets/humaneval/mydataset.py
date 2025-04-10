@@ -1,41 +1,27 @@
-import re
-import pdb
-from jinja2 import Template
-from datasets import load_from_disk
+import os
 import subprocess
 import warnings
+from datasets import load_from_disk
+from src.mydatasets.dataset_base import DatasetBase
 
-from src.myutils.file import read_txt, load_json
 
-
-class MyDataset:
-    def __init__(self, size="tiny", use_fewshot=False, dataset_name="humaneval"):
-        self.dataset_name = dataset_name
+class MyDataset(DatasetBase):
+    def __init__(self, size="tiny", use_fewshot=False):
+        super().__init__(size=size, use_fewshot=use_fewshot)
         if use_fewshot:
             warnings.warn("Few-shot learning is not supported for humaneval dataset")
-        self.size = size
-        self.TINY_NUM = 5
-        self.init_dataset()
+        self.dataset = load_from_disk(os.path.join(self.cls_abspath, "dataset"))["test"]
 
-    def init_dataset(self):
-        hf_dataset = load_from_disk(f"src/mydatasets/{self.dataset_name}/dataset")[
-            "test"
-        ]
-        if self.size == "tiny":
-            hf_dataset = hf_dataset.select(range(self.TINY_NUM))
-        elif isinstance(self.size, int):
-            hf_dataset = hf_dataset.shuffle(seed=42).select(range(self.size))
-        self.datas = hf_dataset
-
-    def get_prompts(self):
-        return self.datas["prompt"]
+    @property
+    def prompts(self):
+        return self.dataset["prompt"]
 
     def evaluate(self, preds):
         for i, p in enumerate(preds):
             preds[i] = self.clean_pred(p)
         n_correct = 0
         for i, pred in enumerate(preds):
-            n_correct += self.check_correctness(self.datas[i], pred, timeout=5)
+            n_correct += self.check_correctness(self.dataset[i], pred, timeout=5)
         return n_correct / len(preds)
 
     def check_correctness(self, problem, completion, timeout):
@@ -47,20 +33,18 @@ class MyDataset:
             + "\n\n"
             + f'check({problem["entry_point"]})'
         )
-        return not self.check_python_program_error(code)
+        return not self.check_python_program_error(code, timeout=timeout)
 
-    def check_python_program_error(self, python_program):
+    def check_python_program_error(self, python_program, timeout):
         try:
             result = subprocess.run(
                 ["python", "-c", python_program],
                 capture_output=True,
                 text=True,
-                timeout=10,
+                timeout=timeout,
             )
             return result.returncode != 0
-        except subprocess.TimeoutExpired:
-            return True
-        except Exception as e:
+        except:
             return True
 
     def clean_pred(self, pred):
@@ -72,4 +56,4 @@ class MyDataset:
 
 
 if __name__ == "__main__":
-    dataset = MyDataset(tiny=True)
+    dataset = MyDataset(size="tiny")
