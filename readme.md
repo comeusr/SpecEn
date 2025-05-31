@@ -7,7 +7,7 @@
 <img alt="Static Badge" src="https://img.shields.io/badge/🌐-Project_Page-purple"> </a>
 </p>
 
-**Collaborative decoding via Speculation (CoS)** is a novel framework that accelerates the collaboration, i.e. weighted ensemble or contrastive decoding, of multiple LLMs without sacrificing performance. It achieves a performance boost of 1.11x to 2.23x over standard ensemble methods in two- or three-model configurations.
+**Collaborative decoding via Speculation (CoS)** is a novel framework that accelerates the collaboration, e.g. weighted ensemble or contrastive decoding, of multiple LLMs without sacrificing performance. It achieves a performance boost of 1.11x to 2.23x over standard collaboration methods in two- or three-model configurations.
 
 <img src="./assets/teaser.png" style="display: block; margin: 0 auto; width: 70%;">
 
