@@ -1,18 +1,29 @@
-<h1 align="center">Speculative Ensemble</h1>
+<h1 align="center">Fast Large Language Model Collaborative Decoding via Speculation</h1>
 
 <p align="center">
-<a href="https://arxiv.org/abs/2502.01662v1">
-<img alt="Static Badge" src="https://img.shields.io/badge/arXiv-2502.01662v1-red"></a>
+<a href="https://arxiv.org/abs/2502.01662">
+<img alt="Static Badge" src="https://img.shields.io/badge/arXiv-2502.01662-red"></a>
+<a href="https://forjadeforest.github.io/LMM-R1-ProjectPage/">
+<img alt="Static Badge" src="https://img.shields.io/badge/🌐-Project_Page-purple"> </a>
 </p>
 
-**Speculative Ensemble** is a novel framework that accelerates the ensemble of multiple LLMs without sacrificing performance. It achieves a performance boost of 1.11x to 2.23x over standard ensemble methods in two- or three-model configurations.
+**Collaborative decoding via Speculation (CoS)** is a novel framework that accelerates the collaboration, i.e. weighted ensemble or contrastive decoding, of multiple LLMs without sacrificing performance. It achieves a performance boost of 1.11x to 2.23x over standard ensemble methods in two- or three-model configurations.
 
+<img src="./assets/teaser.png" style="display: block; margin: 0 auto; width: 70%;">
+
+## News
+- [2025/5/29] 🚀 Our paper is renamed from *Speculative Ensemble: Fast Large Language Model Ensemble via Speculation* to **Fast Large Language Model Collaborative Decoding via Speculation**.
+- [2025/5/29] We release NPU version of CoS at npu branch. It is implemented in full `transfomers` and `PyTorch` manner, which is easier to understand and read.
+- [2025/5/1] ✨ Our paper is accepted on ICML 2025.
+
+- [2025/2/1] We release paper on [arXiv](https://arxiv.org/abs/2502.01662).
+  
 ## Setup
 
 ```bash
 # Create and activate the environment
-conda create -n specens python=3.11 -y
-conda activate specens
+conda create -n cos python=3.11 -y
+conda activate cos
 
 # Install vllm
 cd vllm
@@ -45,7 +56,7 @@ pip install -r requirements.txt
 
 ## Code Reading Guides
 
-**Chef** is the internal name for the speculative ensemble implementation. The code is located in [`vllm/vllm/chef`](./vllm/vllm/chef/), while the baseline ensemble implementation can be found at [`vllm/vllm/ensemble_decode`](./vllm/vllm/ensemble_decode).
+**Chef** is the internal name for the CoS implementation. The code is located in [`vllm/vllm/chef`](./vllm/vllm/chef/), while the baseline ensemble implementation can be found at [`vllm/vllm/ensemble_decode`](./vllm/vllm/ensemble_decode).
 
 We have implemented multiple model inference methods. The configuration files are located in [`configs/method`](./configs/method/), and the desired method can be specified via `method={method_name}` (see Step 2 of [How to run](#how-to-run)). Annotations are as follows:
 
@@ -74,10 +85,10 @@ We have implemented multiple model inference methods. The configuration files ar
 ## Citation
 
 ```bib
-@article{fu2025speculative,
-  title={Speculative Ensemble: Fast Large Language Model Ensemble via Speculation},
+@inproceedings{fu2025speculative,
+  title={Fast Large Language Model Collaborative Decoding via Speculation},
   author={Fu, Jiale and Jiang, Yuchu and Chen, Junkai and Fan, Jiaming and Geng, Xin and Yang, Xu},
-  journal={arXiv preprint arXiv:2502.01662},
+  booktitle={Forty-two International Conference on Machine Learning},
   year={2025}
 }
 ```
