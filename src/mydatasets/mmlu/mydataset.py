@@ -25,12 +25,24 @@ class MyDataset(DatasetBase):
         return prompts
 
     def evaluate(self, preds):
+        # print("-"*50+"Debugging the MMLU dataset"+"-"*50)
+        # for p in preds:
+        #     print("="*5+"Prediction"+"="*5)
+        #     print(p)
         preds = [p.split("\n\nQ:")[0] for p in preds]
         choices = ["A", "B", "C", "D"]
         correct = 0
         for i, pred in enumerate(preds):
             ans_pred = self.find_answer(pred)
             gold = choices[self.dataset[i]["answer"]]
+
+            # print("="*5+"Before Parse"+"="*5)
+            # print(pred)
+            # print("="*5+"Prediction"+"="*5)
+            # print(ans_pred)
+            # print("="*5+"Label"+"="*5)
+            # print(gold)
+
             if ans_pred == gold:
                 correct += 1
         result = float(correct) / len(preds)

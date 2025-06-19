@@ -1,11 +1,13 @@
 defaults:
   - default
-  - ensemble
+  - we
   - _self_
 
 
 # should be an integer, it applied to the last model given in extra_model
 gamma: null
+draft_model: null
 
 llm:
   num_speculative_tokens: ${..gamma}
+  speculative_model: ${path_join:${oc.env:MODEL_PATH},${..draft_model}}

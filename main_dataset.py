@@ -2,19 +2,28 @@ import os
 import sys
 import importlib
 import warnings
+from tqdm import tqdm
+
+from omegaconf import OmegaConf
+from omegaconf import DictConfig
+
 
 import torch
 from pprint import pprint
-from tqdm import tqdm
 import hydra
 import numpy as np
 from dotenv import load_dotenv
-from omegaconf import DictConfig
+
 from src.myutils.file import write_json, load_json
 sys.path.insert(0, os.path.abspath("./vllm"))
 
 from vllm import LLM, SamplingParams
+from configs import config_holder
 
+
+def create_spec_config(cfg):
+    spec_config = OmegaConf.to_container(cfg.method.spec, resolve=True)
+    return spec_config
 
 
 def warpped_sampling(prompts, llm, sampling_params, enable_test_speed, max_prompt_len):
@@ -43,6 +52,9 @@ def warpped_sampling(prompts, llm, sampling_params, enable_test_speed, max_promp
             ]
             prompt = tokenizer.decode(prompt_token_ids[0], skip_special_tokens=True)
         if enable_test_speed:
+
+            # print("-"*50+"Printing prompts"+"-"*50)
+            # print(prompt)
             starter.record()
             output = llm.generate(prompt, sampling_params, use_tqdm=False)
             ender.record()
@@ -134,12 +146,14 @@ def process_result(cfg, results, evaluate_func):
 
     pprint(results_stats)
 
-    if cfg.save_path:
-        write_json(cfg.save_path, results)
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="default")
 def main(cfg: DictConfig):
+    
+    config_holder.CONFIG = cfg
+
+    torch.cuda.empty_cache()
 
     preprocess_cfg(cfg)
     torch.manual_seed(cfg.seed)
@@ -147,9 +161,22 @@ def main(cfg: DictConfig):
     dataset = init_dataset(cfg)
     prompts = dataset.prompts
 
-    llm = LLM(**cfg.method.llm)
+    print("-"*20+"Printing the model config"+"-"*20)
+    print(cfg.method.llm)
+
+    if getattr(cfg.method, "spec", ''):
+        spec_cfg = create_spec_config(cfg)
+        llm = LLM(speculative_config=spec_cfg, **cfg.method.llm)
+    else:
+        llm = LLM(**cfg.method.llm)
+
     sampling_params = SamplingParams(seed=cfg.seed, **cfg.method.generate)
 
+    # print("-"*20+"Printing the llm object"+"-"*20)
+    # print(llm.__dict__)
+    # print("-"*20+"Printing the generation config"+"-"*20)
+    # print(sampling_params)
+    
     results = warpped_sampling(
         prompts,
         llm=llm,
@@ -159,6 +186,8 @@ def main(cfg: DictConfig):
     )
 
     process_result(cfg, results, dataset.evaluate)
+
+    dataset.save(cfg.save_path)
 
 
 if __name__ == "__main__":

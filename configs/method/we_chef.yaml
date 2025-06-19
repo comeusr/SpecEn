@@ -1,6 +1,6 @@
 defaults:
   - default
-  - ensemble_sd
+  - we_sd
   - _self_
 
 

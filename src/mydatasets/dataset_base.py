@@ -29,11 +29,33 @@ class PostInitMeta(ABCMeta):
         elif instance.size == "small":
             instance.size = DatasetSize.Small
         elif instance.size == "full":
-            instance.size = len(instance.dataset)
+            instance.size = DatasetSize.Full
+
+        # Compute the sample size
+        sample_size = len(instance.dataset) if instance.size == DatasetSize.Full else instance.size.value
+
+        print("[Debug PostInitmeta]: Before instance size {}".format(len(instance.dataset)))
+
 
         instance.dataset = instance.dataset.shuffle(seed=42).select(
-            range(min(instance.size.value, len(instance.dataset)))
+            range(min(sample_size, len(instance.dataset)))
         )
+        
+        if hasattr(instance, "references") and instance.references is not None:
+            instance.references = [data["highlights"] for data in instance.dataset]
+
+        # print("-"*50+"Debugging the dataset base"+"-"*50)
+        # print("="*5+"Prompt"+"="*5)
+        # print([instance.prompt_template.render(**data) for data in instance.dataset][0])
+        # print("="*5+"Reference"+"="*5)
+        # print([data["highlights"] for data in instance.dataset][0])
+
+        # for data in instance.dataset:
+        #     print("="*5+"Prompt"+"="*5)
+        #     print()
+        #     print("="*5+"Reference"+"="*5)
+        #     print(data["highlights"])
+
 
         return instance
 
