@@ -1,0 +1,6 @@
+defaults:
+  - base_model
+
+name_or_path: Qwen/Qwen2.5-1.5B
+block_name: QWenBlock
+attn_implementation: flash_attention_2
