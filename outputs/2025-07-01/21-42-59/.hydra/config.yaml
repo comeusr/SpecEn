@@ -1,0 +1,55 @@
+seed: 1
+exp_name: Qwen3-8B_Qwen-06B_sft
+datasets:
+- gsm8k
+debug: false
+wandb:
+  enabled: true
+  entity: null
+  project: halos
+cache_dir: .cache/
+local_run_dir: ${cache_dir}/${exp_name}
+do_first_eval: true
+minimum_log_interval_secs: 1.0
+intermediate_checkpoints: false
+trainer: BasicTrainer
+lr: 1.0e-06
+n_epochs: 1
+global_epochs: 1
+n_examples: null
+n_eval_examples: 256
+eval_every: 1000
+optimizer: AdamW
+warmup_steps: 150
+cache_reference_logprobs: false
+load_reference_logprobs: null
+frac_unique_desirable: 1.0
+frac_unique_undesirable: 1.0
+model:
+  name_or_path: ZeeeWP/Qwen3-8B_Qwen3-06B
+  tokenizer_name_or_path: null
+  load_from: null
+  from_checkpoint: null
+  block_name: QWenBlock
+  policy_dtype: bfloat16
+  reference_dtype: bfloat16
+  max_grad_norm: 5.0
+  v_head_max_grad_norm: 0.1
+  max_length: 1024
+  max_prompt_length: 512
+  activation_checkpointing: true
+  batch_size: 4
+  microbatch_size: null
+  gradient_accumulation_steps: 4
+  eval_batch_size: 8
+  attn_implementation: flash_attention_2
+  use_peft: false
+  load_lora_from: null
+  peft:
+    lora_r: 64
+    lora_alpha: 256
+    lora_dropout: 0.05
+    target_modules: all-linear
+loss:
+  trainer: SFTTrainer
+  dataloader: SFTDataLoader

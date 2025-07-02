@@ -83,6 +83,7 @@ class BasicTrainer(object):
 
     def prepare_accelerator(self):
         """Prepare the Accelerator."""
+        self.accelerator.print("="*10+"Accelerator Preparing Models"+"="*10)
         self.policy, self.reference_model, self.train_iterator, self.eval_iterator, self.optimizer, self.scheduler = self.accelerator.prepare(
             self.policy,
             self.reference_model,
@@ -91,6 +92,7 @@ class BasicTrainer(object):
             self.optimizer, 
             self.scheduler
         )
+        self.accelerator.print("="*10+"Accelerator Finish Preparing"+"="*10)
 
     def get_batch_logps(self, logits: torch.FloatTensor, labels: torch.LongTensor):
         """Compute the token-level log probabilities of the given labels under the given logits."""

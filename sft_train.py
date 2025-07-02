@@ -14,18 +14,20 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
 from transformers import TrainingArguments, DataCollatorForLanguageModeling
 from datasets import load_dataset
 from peft import LoraConfig, TaskType, get_peft_model, PeftModel
-from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialL
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 
 from ensemble_model.modeling_ensemble import EnsembleModelForCausalLM
 
 from train import trainers
 from train import dataloader
 from train.utils import disable_dropout
-from train.trainsers import SFTTrainer
+from train.trainers import SFTTrainer
 
 
 @hydra.main(version_base=None, config_path="train_config", config_name="config")
 def main(config: DictConfig):
+
+    print("="*10+"Start Main"+"="*10)
 
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     accelerator = Accelerator(
@@ -80,7 +82,7 @@ def main(config: DictConfig):
     # Prepare tokenizer
     tokenizer_name_or_path = config.model.tokenizer_name_or_path or config.model.name_or_path
     accelerator.print(f'Loading tokenizer {tokenizer_name_or_path}')
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name_or_path)
+    tokenizer = AutoTokenizer.from_pretrained('Qwen/Qwen3-8B', trust_remote_code=True)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
@@ -132,10 +134,31 @@ def main(config: DictConfig):
     )
         
     # 4. Load custom model
-    model = EnsembleModelForCausalLM.from_pretrained("ZeeeWP/Qwen3-8B_Qwen3-06B")
-    
-    model.model.requires_grad=False
-    
+    policy = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-8B", torch_dtype=torch.bfloat16, trust_remote_code=True, attn_implementation="flash_attention_2")
+    policy.model.requires_grad=False
+
+    # Loading optimizer, scheduler
+    accelerator.print("Creating optimizer and scheduler")
+    optimizer = getattr(torch.optim, config.optimizer)(policy.parameters(), lr=config.lr)
+
+    warmup_scheduler = LinearLR(optimizer, start_factor=0.1, end_factor=1.0, total_iters=config.warmup_steps)
+    main_scheduler = CosineAnnealingLR(optimizer, T_max=train_iterator.num_training_steps - config.warmup_steps, eta_min=0)
+    scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[config.warmup_steps])
+
+    if config.model.from_checkpoint:
+        optimizer_state = optimizer.state_dict()
+        optimizer_state.update(torch.load(os.path.join(config.model.from_checkpoint, "optimizer.pt"), map_location='cpu'))
+        optimizer.load_state_dict(optimizer_state)
+
+        scheduler_state = torch.load(os.path.join(config.model.from_checkpoint, "scheduler.pt"))
+        scheduler.load_state_dict(scheduler_state)
+
+        metrics = json.load(open(os.path.join(config.model.from_checkpoint, 'metrics.json')))
+        num_skip_batches = int(metrics.get('counter', 0) / config.model.batch_size)
+    else:
+        num_skip_batches = 0
+
+    accelerator.print("Initial Trainer")
     trainer = SFTTrainer(
         tokenizer, 
         config, 
@@ -145,9 +168,10 @@ def main(config: DictConfig):
         optimizer,
         scheduler,
         policy, 
-        reference_model=reference_model,
+        reference_model=None,
         num_skip_batches=num_skip_batches,
     )
+    accelerator.print("Initialed Trainer")
     
     # 7. Train
     trainer.train()

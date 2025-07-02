@@ -1,0 +1,8 @@
+- loss=sft
+- model=qwen
+- datasets=[gsm8k]
+- exp_name=Qwen3-8B_Qwen-06B_sft
+- model.name_or_path=ZeeeWP/Qwen3-8B_Qwen3-06B
+- model.use_peft=false
+- lr=1e-6
+- model.batch_size=4

@@ -22,12 +22,20 @@ import tqdm
 import re
 import random
 import json
+from jinja2 import Template
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from .utils import rank0_print, on_rank0, delete_dict
 import pandas as pd
 import numpy as np
 
+def read_txt(path):
+    try:
+        with open(path, 'r', encoding='utf-8') as file:
+            content = file.read()
+        return content
+    except FileNotFoundError:
+        raise FileNotFoundError(f'File not found: {path}')
 
 @dataclass
 class Example:
@@ -526,7 +534,52 @@ def get_ultrachat(split: str) -> Dataset:
 
 def get_gsm8k(split: str) -> Dataset:
     rank0_print(f'Loading GSM8K dataset ({split} split) from Huggingface...')
-    dataset = datasets.load_dataset("openai/gsm8k", split=split)
+    dataset = datasets.load_dataset("openai/gsm8k", "main", split=split)
+
+    few_shot_example_path = "/home/sagemaker-user/SpecEn/src/mydatasets/gsm8k/prompt_fewshot.txt"
+
+
+    def parse_prompt_to_conversation(prompt_text):
+        conversation = []
+        
+        # Split into blocks starting with "Question:"
+        entries = re.split(r'\n(?=Question:)', prompt_text)
+        
+        for entry in entries:
+            entry = entry.strip()
+            if not entry:
+                continue
+        
+            # Extract full question + "Question:" line
+            question_match = re.search(r'(Question:.*?)(?=\nAnswer:)', entry, re.DOTALL)
+            # Extract full answer + "Answer:" line, including #### line
+            answer_match = re.search(r'(Answer:.*)', entry, re.DOTALL)
+        
+            if question_match and answer_match:
+                question_full = question_match.group(1).strip()
+                answer_full = answer_match.group(1).strip()
+        
+                conversation.append({"role": "user", "content": question_full})
+                conversation.append({"role": "assistant", "content": answer_full})
+        
+        return conversation
+
+
+    def attach_template(dataset, template_path=few_shot_example_path):
+        template = Template(read_txt(template_path))
+        result = []
+        for data in dataset:
+            answer = {"role": "assistant", "content": data['answer']}
+            
+            result.append(
+                {"question": data['question'],
+                "prompt": parse_prompt_to_conversation(template.render(**data)),
+                "original_prompt": template.render(**data),
+                "answer": answer}
+            )
+        return result
+        
+    dataset = attach_template(dataset)
 
     if on_rank0():
         dataset = tqdm.tqdm(dataset, desc='Processing GSM8K')
@@ -535,9 +588,13 @@ def get_gsm8k(split: str) -> Dataset:
 
     for row in dataset:
         key = row['question']
-        data[key].prompt = [row['question']]
-        data[key].answer = [row['answer']]
-
+        data[key].prompt = row['prompt']
+        data[key].original_prompt = [row['question']]
+        data[key].generations = [row['answer']]
+        data[key].sft_index = 0
+        data[key].dataset_name = data.name
+        data[key].truncation_mode = 'target'
+        
     return data
         
 
@@ -677,7 +734,8 @@ class DataLoader:
         # truncate the prompt if necessary
         total_length = 0
 
-        # truncate history to fit in self.max_prompt_length
+
+         # truncate history to fit in self.max_prompt_length
         for i, turn in enumerate(conversation):
             content_token_ids = filter_out_bos_eos(self.tokenizer.encode(turn['content']))
             # we're only modifying the text in content but need to consider the formatted length
@@ -694,6 +752,7 @@ class DataLoader:
 
         # truncate the generation if necessary 
         for i, turn in enumerate(generation):
+
             content_token_ids = filter_out_bos_eos(self.tokenizer.encode(turn['content']))
             # we're only modifying the text in content but need to consider the formatted length
             templated_length = len(self.tokenizer.apply_chat_template([turn], tokenize=True, add_generation_prompt=False))
@@ -780,6 +839,7 @@ class SFTDataLoader(DataLoader):
             for example in flat_data:
                 # Assuming example.prompt is now a list of conversation turns
                 conversation = example.prompt
+                
                 if not isinstance(conversation[0], dict):
                     # Convert to the new format if it's not already
                     conversation = [{"role": "user", "content": conversation[0]}]
@@ -788,7 +848,7 @@ class SFTDataLoader(DataLoader):
                         conversation.append({"role": role, "content": message})
 
                 # Get the target generation (last turn from assistant)
-                target_generation = example.generations[example.sft_index]
+                target_generation = [example.generations[example.sft_index]]
 
                 # Add control token if specified
                 if self.control_tokens.get('chosen'):
@@ -1191,3 +1251,25 @@ class PairedPreferenceDataLoader(DataLoader):
         max_prompt_count = min(float("inf"), self.max_prompt_count) if self.max_prompt_count else float("inf")
         all_data = int(sum(min(max_prompt_count, len(example.pairs)) for _, example in self.full_data.items()))
         return all_data // self.num_processes
+
+
+if __name__ == "__main__":
+    from transformers import AutoTokenizer
+    
+    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B", trust_remote_code=True)
+    
+    gsm8k_data = SFTDataLoader(
+        ['gsm8k'],
+        tokenizer,
+        split='train',
+        microbatch_size=4,
+        n_epochs=1,
+    )
+
+    count = 0
+
+    for batch in gsm8k_data:
+        if count == 5:
+            break
+        count += 1
+        

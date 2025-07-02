@@ -1,8 +1,5 @@
 #!/bin/bash
 
-export HF_TOKEN=holder
-export WANDB_API_KEY=holder
-
 export MASTER_ADDR=127.0.0.1
 export MASTER_PORT=$(shuf -i 29500-29600 -n 1)
 
