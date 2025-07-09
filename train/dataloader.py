@@ -562,14 +562,14 @@ def get_gsm8k(split: str) -> Dataset:
                 conversation.append({"role": "user", "content": question_full})
                 conversation.append({"role": "assistant", "content": answer_full})
         
-        return conversation
+        return conversation[:-1]
 
 
     def attach_template(dataset, template_path=few_shot_example_path):
         template = Template(read_txt(template_path))
         result = []
         for data in dataset:
-            answer = {"role": "assistant", "content": data['answer']}
+            answer = {"role": "assistant", "content": "Answer: Let's think step by step."+data['answer']}
             
             result.append(
                 {"question": data['question'],
@@ -699,7 +699,8 @@ class DataLoader:
                     else:
                         padding_size = max_len - len(seq)
                         padding = torch.full((padding_size,), padding_value, dtype=seq.dtype)
-                        padded_seq = torch.cat([seq, padding])
+                        padded_seq = torch.cat([seq, padding], dim=-1)
+
                     padded_sequences.append(padded_seq)
 
                 padded_batch[k] = torch.stack(padded_sequences)
@@ -780,6 +781,7 @@ class DataLoader:
             f'{prefix}': generation,
             'prompt_text': untruncated_prompt_string,
             'prompt_input_ids': tokenized_prompt,
+            'prompt_attention_mask': [1]*len(tokenized_prompt),
             f'{prefix}_text': self.tokenizer.apply_chat_template(generation, tokenize=False),
             f'{prefix}_combined_text': tokenized_prompt_and_generation_string,
             f'{prefix}_combined_input_ids': tokenized_prompt_and_generation,
@@ -792,6 +794,7 @@ class DataLoader:
             tokenized_prompt.pop()
         
         labels = tokenized_prompt_and_generation[:]
+
         labels[:len(tokenized_prompt)] = [-100] * len(tokenized_prompt)
         batch_element[f'{prefix}_labels'] = labels
 

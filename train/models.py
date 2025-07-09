@@ -2,6 +2,9 @@
 Contains the classes necessary for doing PPO (offline, one-step) with language model.
 This code is partially from the TRL library, with some modifications to ensure stability.
 """
+import gc
+from omegaconf import OmegaConf
+
 import json
 import os
 import pickle
@@ -9,9 +12,15 @@ from copy import deepcopy
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from huggingface_hub import hf_hub_download
 from transformers import PreTrainedModel, AutoModelForCausalLM, AutoModelForSequenceClassification
+from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
+from transformers.generation import GenerationMixin
+from transformers.utils import ModelOutput
+
+
 from accelerate.utils import gather_object
 from tqdm import tqdm
 from typing import Dict, Any, Tuple, Union, Optional
@@ -200,36 +209,187 @@ class EnsembleHead(nn.Module):
     The weights of the value head need to be in FP32.
     """
 
-    def __init__(self, config, **kwargs):
-        super().__ini__()
+    def __init__(self, target_hidden_size, draft_hidden_size, config=None, **kwargs):
+        super().__init__()
         if not hasattr(config, "summary_dropout_prob"):
             summary_dropout_prob = kwargs.pop("summary_dropout_prob", 0.1)
         else:
-            summary_dropout_prob = config.summary_dropout_prob
+            summary_dropout_prob = config.model.summary_dropout_prob
 
         # some models such as OPT have a projection layer before the word embeddings - e.g. OPT-350m
-        if hasattr(config, "word_embed_proj_dim"):
-            hidden_size = config.word_embed_proj_dim
-        else:
-            hidden_size = config.hidden_size
+        self.config = config
+        self.target_hidden_size = target_hidden_size
+        self.draft_hidden_size = draft_hidden_size
+        self.hidden_size = target_hidden_size+draft_hidden_size
 
-        self.summary = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size),
-            nn.Dropout(summary_dropout_prob) if summary_dropout_prob else nn.Identity(),
-            nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.Dropout(summary_dropout_prob) if summary_dropout_prob else nn.Identity(),
-            nn.ReLU(),
-            nn.Linear(hidden_size, 1)
-        )
+        # self.summary = nn.Sequential(
+        #     nn.Linear(self.hidden_size,self.hidden_size),
+        #     nn.Dropout(summary_dropout_prob) if summary_dropout_prob else nn.Identity(),
+        #     nn.ReLU(),
+        #     nn.Linear(self.hidden_size, self.hidden_size),
+        #     nn.Dropout(summary_dropout_prob) if summary_dropout_prob else nn.Identity(),
+        #     nn.ReLU(),
+        #     nn.Linear(target_hidden_size+draft_hidden_size, 2)
+        # )
+
+        self.summary = nn.Linear(self.hidden_size, 2)
+        torch.nn.init.xavier_uniform_(self.summary.weight)
+        self.summary.to(torch.bfloat16)
 
     def forward(self, hidden_states):
-        hidden_states = hidden_states.detach().to(torch.float32)
-        output = self.summary(hidden_states)
+        with torch.autocast(device_type="cuda", dtype=torch.float32):
+            hidden_states = hidden_states.detach().to(torch.float32)
+            output = self.summary(hidden_states)
         return output
+
+
+class EnsembleWrapper(nn.Module, GenerationMixin):
+
+    def __init__(self, 
+                 target_model, 
+                 draft_model, 
+                 manual_place_head=False,
+                 config=None, 
+                 **kwargs):
+        super().__init__()
+        self.target_model = target_model
+        self.draft_model = draft_model
+
+        if manual_place_head:
+            self.ensemble_head = EnsembleHead(target_model.config.hidden_size, draft_model.config.hidden_size).to(self.target_model.device)
+        else:
+            self.ensemble_head = EnsembleHead(target_model.config.hidden_size, draft_model.config.hidden_size)
+
+        self.generation_config = target_model.generation_config
+        self.config = target_model.config
+        self.main_input_name = target_model.main_input_name
+        self._supports_cache_class = target_model._supports_cache_class
+        self.device = target_model.device
+
+        self._target_past_key_values = None
+        self._draft_past_key_values = None
+
+    def reset_cache(self):
+        self._target_past_key_values = None
+        self._draft_past_key_values = None
+
+    def forward(
+        self,
+        input_ids=None,
+        target_past_key_values=None,
+        draft_past_key_values=None,
+        attention_mask=None,
+        use_cache=True,
+        **kwargs,
+    ):
+        with torch.no_grad():
+            draft_output = self.draft_model(input_ids=input_ids, 
+                                            past_key_values=self._draft_past_key_values, 
+                                            attention_mask=attention_mask,
+                                            use_cache=use_cache,
+                                            output_hidden_states=True)
+            if use_cache:
+                self._draft_past_key_values = draft_output.past_key_values
+            draft_last_hidden = draft_output.hidden_states[-1].detach()
+            draft_logits = draft_output.logits.detach()
+            del draft_output
+            torch.cuda.empty_cache()
+            
         
+        with torch.no_grad():
+            target_output = self.target_model(input_ids=input_ids, 
+                                            past_key_values=self._target_past_key_values,
+                                            attention_mask=attention_mask,
+                                            use_cache=use_cache,
+                                            output_hidden_states=True)
+            if use_cache:
+                self._target_past_key_values = target_output.past_key_values
+            target_last_hidden = target_output.hidden_states[-1].detach()
+            target_logits = target_output.logits.detach()
+            del target_output
+            torch.cuda.empty_cache()
+
+        ensemble_input = torch.cat([draft_last_hidden, target_last_hidden], dim=-1)
+        ensemble_weights = F.softmax(self.ensemble_head(ensemble_input), dim=-1)
+
+        w_draft = ensemble_weights[..., 0].unsqueeze(-1)  # [B, T, 1]
+        w_target = ensemble_weights[..., 1].unsqueeze(-1)
+
+        draft_logits = draft_logits.to(ensemble_weights.dtype)
+        target_logits = target_logits.to(ensemble_weights.dtype)
+
+        logits = draft_logits.mul(w_draft)
+        logits.add_(target_logits.mul(w_target))
+
+        del draft_logits, target_logits
+
+        loss = None
+        # logits = target_output.logits
+
+        return CausalLMOutputWithPast(
+            loss=loss,
+            logits=logits,
+            past_key_values=None,
+            hidden_states=None,
+            attentions=None,
+        )
+
+    def save_pretrained(
+        self,
+        save_directory: str,
+        is_main_process: bool = True,
+        state_dict: Optional[dict] = None,
+        save_function: callable = torch.save,
+        **kwargs
+    ):
+        if not is_main_process:
+            return
+        
+        os.makedirs(save_directory, exist_ok=True)
+    
+        # Save ensemble head weights
+        head_path = os.path.join(save_directory, "ensemble_head.bin")
+        save_function(self.ensemble_head.state_dict(), head_path)
+    
+        # Save config (store paths to base models too)
+        config_to_save = {
+            "target_model_path": self.target_model.name_or_path,
+            "draft_model_path": self.draft_model.name_or_path,
+            "target_hidden_size": self.ensemble_head.target_hidden_size,
+            "draft_hidden_size": self.ensemble_head.draft_hidden_size,
+        }
+        with open(os.path.join(save_directory, "ensemble_config.json"), "w") as f:
+            json.dump(config_to_save, f)
 
 
+    def load_ensemble_head(self, load_directory):
+
+        head_path = os.path.join(load_directory, "ensemble_head.bin")
+        self.ensemble_head.load_state_dict(torch.load(head_path, map_location="cpu"))
+
+        return
+
+
+    # @torch.no_grad()
+    # def generate(
+    #     self,
+    #     inputs: Optional[torch.Tensor] = None,
+    #     generation_config: Optional[GenerationConfig] = None,
+    #     logits_processor: Optional[LogitsProcessorList] = None,
+    #     stopping_criteria: Optional[StoppingCriteriaList] = None,
+    #     prefix_allowed_tokens_fn: Optional[Callable[[int, torch.Tensor], list[int]]] = None,
+    #     synced_gpus: Optional[bool] = None,
+    #     assistant_model: Optional["PreTrainedModel"] = None,
+    #     streamer: Optional["BaseStreamer"] = None,
+    #     negative_prompt_ids: Optional[torch.Tensor] = None,
+    #     negative_prompt_attention_mask: Optional[torch.Tensor] = None,
+    #     use_model_defaults: Optional[bool] = None,
+    #     custom_generate: Optional[str] = None,
+    #     **kwargs,
+    # ):
+    
+        
+        
 class ValueHead(nn.Module):
     r"""
     The ValueHead class implements a head for autoregressive that returns a scalar for each output token.
@@ -267,8 +427,6 @@ class ValueHead(nn.Module):
         output = self.summary(hidden_states)
         return output
 
-
-# class AutoModelForCausalLMWithEnsembleHead(PreTrainedModelWrapper):
 
 
 class AutoModelForCausalLMWithValueHead(PreTrainedModelWrapper):

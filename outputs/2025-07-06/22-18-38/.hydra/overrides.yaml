@@ -1,0 +1,11 @@
+- loss=sft
+- model=qwen
+- datasets=[gsm8k]
+- exp_name=Qwen3-8B_Qwen-06B_sft_5e-4
+- global_epochs=2
+- wandb.project=Ensemble
+- model.name_or_path=Qwen/Qwen3-8B
+- cache_dir=/home/sagemaker-user/data/model
+- model.use_peft=false
+- lr=5e-4
+- model.batch_size=4

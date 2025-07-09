@@ -1,0 +1,9 @@
+- loss=sft
+- model=qwen
+- datasets=[gsm8k]
+- exp_name=Qwen3-8B_Qwen-06B_sft
+- wandb.project=Ensemble
+- model.name_or_path=Qwen/Qwen3-8B
+- model.use_peft=false
+- lr=1e-3
+- model.batch_size=4

@@ -34,6 +34,9 @@ max_length: 1024
 # the maximum allowed length for a prompt (remainder will be dedicated to the completion)
 max_prompt_length: 512
 
+# the maximum new tokens
+max_tokens: 1024
+
 # activation checkpointing (not supported for all models; may need to be overwritten)
 activation_checkpointing: true
 
@@ -57,6 +60,9 @@ attn_implementation: eager
 
 # whether to use LoRA training
 use_peft: false
+
+#
+summary_dropout_prob: 0.1
 
 # whether to load LoRAs from somewhere (should be a path to a directory)
 load_lora_from: null

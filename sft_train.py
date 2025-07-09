@@ -16,18 +16,19 @@ from datasets import load_dataset
 from peft import LoraConfig, TaskType, get_peft_model, PeftModel
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 
-from ensemble_model.modeling_ensemble import EnsembleModelForCausalLM
-
 from train import trainers
 from train import dataloader
 from train.utils import disable_dropout
 from train.trainers import SFTTrainer
+from train.models import EnsembleWrapper
+
+
+def count_trainable_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad) 
 
 
 @hydra.main(version_base=None, config_path="train_config", config_name="config")
 def main(config: DictConfig):
-
-    print("="*10+"Start Main"+"="*10)
 
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     accelerator = Accelerator(
@@ -35,9 +36,6 @@ def main(config: DictConfig):
         gradient_accumulation_steps=config.model.gradient_accumulation_steps,
         kwargs_handlers=[ddp_kwargs]
     )
-
-    if accelerator.state.fsdp_plugin is not None:
-        accelerator.state.fsdp_plugin.transformer_layer_cls_to_wrap = config.model.block_name
 
     # Calculate microbatch sizes
     if config.model.batch_size % accelerator.num_processes == 0:
@@ -79,7 +77,7 @@ def main(config: DictConfig):
         accelerator.print(f'Writing to {config.local_run_dir}')
         accelerator.print('=' * 80)
 
-    # Prepare tokenizer
+   # Prepare tokenizer
     tokenizer_name_or_path = config.model.tokenizer_name_or_path or config.model.name_or_path
     accelerator.print(f'Loading tokenizer {tokenizer_name_or_path}')
     tokenizer = AutoTokenizer.from_pretrained('Qwen/Qwen3-8B', trust_remote_code=True)
@@ -92,7 +90,7 @@ def main(config: DictConfig):
         with open("config/template.jinja") as f:
             tokenizer.chat_template = f.read()
 
-        accelerator.print("Default chat template set.")
+        print("Default chat template set.")
 
     control_tokens = list(config.loss.get("control_tokens", {}).values())
     special_tokens.extend(control_tokens)
@@ -134,11 +132,32 @@ def main(config: DictConfig):
     )
         
     # 4. Load custom model
-    policy = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-8B", torch_dtype=torch.bfloat16, trust_remote_code=True, attn_implementation="flash_attention_2")
-    policy.model.requires_grad=False
+    target_model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-8B", 
+                                                  torch_dtype=torch.bfloat16, 
+                                                  trust_remote_code=True, 
+                                                  attn_implementation="flash_attention_2")
 
-    # Loading optimizer, scheduler
+    draft_model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B", 
+                                                  torch_dtype=torch.bfloat16, 
+                                                  trust_remote_code=True, 
+                                                  attn_implementation="flash_attention_2")
+
+
+    policy = EnsembleWrapper(target_model, draft_model, config)
+
+    policy.load_ensemble_head("/home/sagemaker-user/data/model/Qwen3-8B_Qwen-06B_sft_5e-4/FINAL")
+    
+    for name, param in policy.target_model.named_parameters():
+        param.requires_grad=False
+
+    for name, param in policy.draft_model.named_parameters():
+        param.requires_grad=False
+
     accelerator.print("Creating optimizer and scheduler")
+
+    num_params = count_trainable_parameters(policy)
+    accelerator.print(f"Trainable parameters: {num_params:,}")
+    
     optimizer = getattr(torch.optim, config.optimizer)(policy.parameters(), lr=config.lr)
 
     warmup_scheduler = LinearLR(optimizer, start_factor=0.1, end_factor=1.0, total_iters=config.warmup_steps)
