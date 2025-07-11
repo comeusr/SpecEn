@@ -3,6 +3,8 @@ Contains the classes necessary for doing PPO (offline, one-step) with language m
 This code is partially from the TRL library, with some modifications to ensure stability.
 """
 import gc
+import wandb
+from dataclasses import dataclass
 from omegaconf import OmegaConf
 
 import json
@@ -19,12 +21,24 @@ from transformers import PreTrainedModel, AutoModelForCausalLM, AutoModelForSequ
 from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
 from transformers.generation import GenerationMixin
 from transformers.utils import ModelOutput
+from transformers.cache_utils import Cache
 
 
 from accelerate.utils import gather_object
 from tqdm import tqdm
 from typing import Dict, Any, Tuple, Union, Optional
 
+@dataclass
+class EnsembleModelOutWithPast(ModelOutput):
+
+    loss: Optional[torch.FloatTensor] = None
+    logits: Optional[torch.FloatTensor] = None
+    past_key_values: Optional[Cache] = None
+    hidden_states: Optional[tuple[torch.FloatTensor, ...]] = None
+    attentions: Optional[tuple[torch.FloatTensor, ...]] = None
+    w_draft: Optional[torch.FloatTensor] = None
+    w_target: Optional[torch.FloatTensor] = None
+    
 
 class PreTrainedModelWrapper(nn.Module):
     r"""
@@ -280,6 +294,7 @@ class EnsembleWrapper(nn.Module, GenerationMixin):
         draft_past_key_values=None,
         attention_mask=None,
         use_cache=True,
+        log_ensemble_weights=False,
         **kwargs,
     ):
         with torch.no_grad():
@@ -326,12 +341,14 @@ class EnsembleWrapper(nn.Module, GenerationMixin):
         loss = None
         # logits = target_output.logits
 
-        return CausalLMOutputWithPast(
+        return EnsembleModelOutWithPast(
             loss=loss,
             logits=logits,
             past_key_values=None,
             hidden_states=None,
             attentions=None,
+            w_draft=w_draft,
+            w_target=w_target,
         )
 
     def save_pretrained(

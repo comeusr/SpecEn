@@ -44,6 +44,10 @@ import math
 import torch
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
+
+EPS = 1e-8
+
+
 def print_fsdp_param_info(model):
     print(f"{'Module':<40} {'# Params':>12} {'Memory (MB)':>15}")
     print("=" * 70)
@@ -856,6 +860,8 @@ class ReinforceTrainer:
                  eval_iterator, 
                  config,
                  seed=42,
+                 reg_scaler=0.5,
+                 log_ensemble_weight=True,
                  gamma=1.0
                 ):
 
@@ -875,8 +881,10 @@ class ReinforceTrainer:
         self.reward_fn = reward_fn
         self.train_iterator = train_iterator
         self.eval_iterator = eval_iterator
+        self.reg_scaler = reg_scaler
         self.gamma = gamma
         self.config = config
+        self.log_ensemble_weights=log_ensemble_weight
 
 
     def _get_batch_metric(self, batch):
@@ -899,9 +907,6 @@ class ReinforceTrainer:
             if isinstance(self.model, EnsembleWrapper):
                 self.model.reset_cache()
 
-        print("Debuging the output_ids length: ", output_ids.shape)
-        print("Debuging the input_ids shape: ", input_ids.shape[-1])
-        print("Debuging the ouput decoded: ",  self.tokenizer.batch_decode(output_ids, skip_special_tokens=False))
         reply_ids = output_ids[:, input_ids.shape[-1]:]
         generations = self.tokenizer.batch_decode(reply_ids, skip_special_tokens=True)
 
@@ -915,7 +920,7 @@ class ReinforceTrainer:
         attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
 
 
-        outputs = self.model(input_ids=input_ids, attention_mask=attention_mask, use_cache=False)
+        outputs = self.model(input_ids=input_ids, attention_mask=attention_mask, use_cache=False, log_ensemble_weights=False)
         if isinstance(self.model, EnsembleWrapper):
             self.model.reset_cache()
 
@@ -923,7 +928,9 @@ class ReinforceTrainer:
         gen_start = batch['prompt_input_ids'].shape[-1] - 1
         logits_gen = outputs.logits[:, gen_start:, :]         # [B, T_gen, V]
         target_ids_gen = target_ids[:, gen_start:]            # [B, T_gen]
-        
+        w_draft = outputs.w_draft[:, gen_start:, :]
+        w_target = outputs.w_target[:, gen_start:, :]
+
         # 2. Create attention mask to ignore pad tokens
         gen_attention_mask = (target_ids_gen != self.tokenizer.pad_token_id).float()  # [B, T_gen]
         
@@ -934,10 +941,39 @@ class ReinforceTrainer:
         # 4. Apply padding mask and sum
         masked_log_probs = token_log_probs * gen_attention_mask                        # [B, T_gen]
         sequence_log_probs = masked_log_probs.sum(dim=1)                               # [B]
+
+        # 5. Compute the regularization
+
+        if isinstance(self.model, EnsembleWrapper) and self.log_ensemble_weights:
+            w_draft_mean = (w_draft.detach().squeeze(-1) * gen_attention_mask).sum() / gen_attention_mask.sum()
+            w_target_mean = (w_target.detach().squeeze(-1) * gen_attention_mask).sum() / gen_attention_mask.sum()
+            
+            print({
+                "Draft_weight": w_draft_mean.item(),
+                "Target_weight": w_target_mean.item()
+            })
+            wandb.log({
+                "Draft_weight": w_draft_mean.item(),
+                "Target_weight": w_target_mean.item()
+            }, commit=False)
+      
+        w = torch.cat([w_draft, w_target], dim=-1)  # [B, T_gen, 2]
+        entropy = - (w + EPS) * torch.log(w + EPS)  # [B, T_gen, 2]
+        entropy = entropy.sum(dim=-1)               # [B, T_gen]
         
-        # 5. Compute REINFORCE loss
+        # 5.3 Mask out padding
+        entropy = entropy * gen_attention_mask      # [B, T_gen]
+        
+        # 5.4 Sum and average over batch
+        entropy_reg = entropy.mean()     # scalar
+
+        print("Entropy Mean: ", entropy_reg)
+
+        
+        # 6. Compute REINFORCE loss
         rewards = torch.tensor(rewards, dtype=torch.float32, device=sequence_log_probs.device)
-        loss = -(sequence_log_probs * rewards).mean()
+        rewards = rewards-1
+        loss = -(sequence_log_probs * rewards).mean()-self.reg_scaler*entropy_reg
 
         # Logging
         metric = {
@@ -951,58 +987,72 @@ class ReinforceTrainer:
         
 
     def train(self):
+        grad_accum_steps = self.config.model.gradient_accumulation_steps
 
         for epoch in range(self.config.global_epochs):
 
             last_log = None
             batch_metrics = defaultdict(list)
 
-            for batch in self.train_iterator:
+            for batch_idx, batch in enumerate(self.train_iterator):
                 
                 start_time = time.time()
 
                 batch = {k: v.to(self.model.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
                 loss, metrics = self._get_batch_metric(batch)
                 
+                loss = loss / grad_accum_steps
                 loss.backward()
 
                 for k, v in metrics.items():
                     batch_metrics[k].extend(torch.as_tensor(v).reshape(-1).float().cpu().numpy().tolist())
 
-                grad_norm=nn.utils.clip_grad_norm_(self.model.parameters(), self.config.model.max_grad_norm)
-                batch_metrics['grad_norm'].extend(torch.as_tensor(grad_norm).reshape(-1).float().cpu().numpy().tolist())
-                self.optimizer.step()
-                self.scheduler.step()
-                current_lr = self.optimizer.param_groups[0]["lr"]
-                print(f"Learning Rate: {current_lr}")
-                self.optimizer.zero_grad()
 
-                step_time = time.time() - start_time
-                examples_per_second = self.config.model.batch_size / step_time
-                batch_metrics['examples_per_second'].append(examples_per_second)
-                
-                self.batch_counter += 1
-                self.example_counter += self.config.model.batch_size
+                if (batch_idx+1) % grad_accum_steps == 0:
 
-                if last_log is None or time.time() - last_log > self.config.minimum_log_interval_secs:
-                    mean_train_metrics = {}
-                    for k, v in batch_metrics.items():
-                        if len(v) > 0:
-                            mean_train_metrics[k] = sum(v) / len(v)
+                    grad_norm=nn.utils.clip_grad_norm_(self.model.parameters(), self.config.model.max_grad_norm)
+                    batch_metrics['grad_norm'].extend(torch.as_tensor(grad_norm).reshape(-1).float().cpu().numpy().tolist())
+                    self.optimizer.step()
+                    self.scheduler.step()
+                    current_lr = self.optimizer.param_groups[0]["lr"]
+                    print(f"Learning Rate: {current_lr}")
+                    self.optimizer.zero_grad()
+    
+                    step_time = time.time() - start_time
+                    examples_per_second = self.config.model.batch_size / step_time
+                    batch_metrics['examples_per_second'].append(examples_per_second)
+                    
+                    self.batch_counter += 1
+                    self.example_counter += self.config.model.batch_size
+    
+                    if last_log is None or time.time() - last_log > self.config.minimum_log_interval_secs:
+                        mean_train_metrics = {}
+                        for k, v in batch_metrics.items():
+                            if len(v) > 0:
+                                mean_train_metrics[k] = sum(v) / len(v)
+    
+                        mean_train_metrics['counters/examples'] = self.example_counter
+                        mean_train_metrics['counters/updates'] = self.batch_counter
+                        print(f'train stats after {self.example_counter} examples: {formatted_dict(mean_train_metrics)}')
+    
+                        if self.config.wandb.enabled:
+                            wandb.log(mean_train_metrics, step=self.example_counter)
+    
+                        last_log = time.time()
+                        batch_metrics = defaultdict(list)
+                    else:
+                        print(f'skipping logging after {self.example_counter} examples to avoid logging too frequently')
 
-                    mean_train_metrics['counters/examples'] = self.example_counter
-                    mean_train_metrics['counters/updates'] = self.batch_counter
-                    print(f'train stats after {self.example_counter} examples: {formatted_dict(mean_train_metrics)}')
+                    delete_dicts(batch_metrics, mean_train_metrics)
+                    
 
-                    if self.config.wandb.enabled:
-                        wandb.log(mean_train_metrics, step=self.example_counter)
+                if (batch_idx+1) % self.config.model.save_freqs == 0:
+                    self.save(
+                            os.path.join(self.config.local_run_dir, str(batch_idx+1)), 
+                            metrics={'counter': self.example_counter}
+                        )
 
-                    last_log = time.time()
-                    batch_metrics = defaultdict(list)
-                else:
-                    print(f'skipping logging after {self.example_counter} examples to avoid logging too frequently')
-
-                delete_dicts(batch, metrics, batch_metrics, mean_train_metrics)
+                delete_dicts(batch, metrics)
 
 
     def save(self, output_dir: Optional[str] = None, metrics: Optional[Dict] = {}, final_save=True):
@@ -1012,18 +1062,15 @@ class ReinforceTrainer:
             output_dir = os.path.join(self.run_dir, f'step-{self.example_counter}')
 
         os.makedirs(output_dir, exist_ok=True)
-        print(f"Saving tokenizer...")
-        save_pretrained(output_dir)
 
         with open(os.path.join(output_dir, 'metrics.json'), 'w') as f:
             metrics['counter'] = self.example_counter
             json.dump(metrics, f)
-       
         
         print(f"Saving model...")
         print(output_dir)
 
-        unwrapped_model.save_pretrained(
+        self.model.save_pretrained(
             output_dir,
         )
                 

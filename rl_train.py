@@ -29,14 +29,10 @@ def find_answer(text):
 
 def reward_func(completions, ground_truth, **kwargs):
 
-    print(ground_truth)
     contents = [find_answer(completion) for completion in completions]
     ground_truth = [find_answer(truth) for truth in ground_truth]
     # Reward 1 if the content is the same as the ground truth, 0 otherwise
-
-    print("Debuging the reward completions: ", completions)
-    print("Debuging the reward contents: ", contents)
-    print("Debuging the reward ground_truth: ", ground_truth)
+    
     return [1.0 if c == gt else 0.0 for c, gt in zip(contents, ground_truth)]
 
 @hydra.main(version_base=None, config_path="train_config", config_name="config")
@@ -94,6 +90,7 @@ def main(config: DictConfig):
         tokenizer,
         split='train',
         microbatch_size=config.model.batch_size,
+        n_examples=config.n_examples,
         n_epochs=config.n_epochs,
         **data_iterator_kwargs
     )

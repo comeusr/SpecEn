@@ -1,0 +1,13 @@
+- loss=reinforce
+- model=qwen
+- datasets=[gsm8k]
+- exp_name=Qwen3-8B_Qwen-06B_reinforce_5e-4
+- global_epochs=1
+- n_examples=200
+- wandb.project=Ensemble
+- model.name_or_path=Qwen/Qwen3-8B
+- model.max_prompt_length=800
+- cache_dir=/home/sagemaker-user/data/model/REINFORCE
+- model.use_peft=false
+- lr=5e-4
+- model.batch_size=2
