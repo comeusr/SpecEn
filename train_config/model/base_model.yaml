@@ -67,8 +67,11 @@ save_freqs: 8
 #
 summary_dropout_prob: 0.1
 
-# reg_scale
-reg_scale: 20
+#
+reg_scale: 5
+
+#
+target_w_draft: 0.6
 
 # whether to load LoRAs from somewhere (should be a path to a directory)
 load_lora_from: null
