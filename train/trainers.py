@@ -860,8 +860,9 @@ class ReinforceTrainer:
                  eval_iterator, 
                  config,
                  seed=42,
-                 reg_scaler=0.5,
+                 reg_scale=5,
                  log_ensemble_weight=True,
+                 target_w_draft=0.6,
                  gamma=1.0
                 ):
 
@@ -881,16 +882,17 @@ class ReinforceTrainer:
         self.reward_fn = reward_fn
         self.train_iterator = train_iterator
         self.eval_iterator = eval_iterator
-        self.reg_scaler = reg_scaler
+        self.reg_scale = reg_scale
         self.gamma = gamma
         self.config = config
         self.log_ensemble_weights=log_ensemble_weight
+        self.target_w_draft=target_w_draft
 
 
     def _get_batch_metric(self, batch):
 
-        input_ids = batch['prompt_input_ids'].to(self.model.device)
-        attn_mask = batch['prompt_attention_mask']
+        input_ids = batch['original_prompt_input_ids']
+        attn_mask = batch['original_prompt_attention_mask']
         target = [answer[0]['content'] for answer in batch['target']]
 
         self.model.eval()
@@ -945,8 +947,8 @@ class ReinforceTrainer:
         # 5. Compute the regularization
 
         if isinstance(self.model, EnsembleWrapper) and self.log_ensemble_weights:
-            w_draft_mean = (w_draft.detach().squeeze(-1) * gen_attention_mask).sum() / gen_attention_mask.sum()
-            w_target_mean = (w_target.detach().squeeze(-1) * gen_attention_mask).sum() / gen_attention_mask.sum()
+            w_draft_mean = (w_draft.squeeze(-1) * gen_attention_mask).sum() / gen_attention_mask.sum()
+            w_target_mean = (w_target.squeeze(-1) * gen_attention_mask).sum() / gen_attention_mask.sum()
             
             print({
                 "Draft_weight": w_draft_mean.item(),
@@ -973,8 +975,21 @@ class ReinforceTrainer:
         # 6. Compute REINFORCE loss
         rewards = torch.tensor(rewards, dtype=torch.float32, device=sequence_log_probs.device)
         rewards = rewards-1
-        loss = -(sequence_log_probs * rewards).mean()-self.reg_scaler*entropy_reg
+        reward_loss = -(sequence_log_probs * rewards).mean()
+        reg_loss = (w_draft_mean - self.config.model.target_w_draft) ** 2
 
+        # Compute dynamic scale
+        reward_value = abs(reward_loss.detach().item())
+        reg_value = reg_loss.detach().item()
+        
+        if reward_value > EPS:
+            scale = 0.05 * reward_value / (reg_value + EPS)
+        else:
+            scale = self.config.model.reg_scale  # fallback when reward is zero
+        
+        # Total loss
+        loss = reward_loss + scale * reg_loss
+       
         # Logging
         metric = {
             "loss": loss.item(),
@@ -984,7 +999,19 @@ class ReinforceTrainer:
 
         return loss, metric
 
-        
+
+    def compute_total_loss(reward_loss: torch.Tensor, regularization_loss: float, eps=1e-8):
+        # Detach reward_loss to safely get its scalar value
+        reward_value = torch.abs(reward_loss.detach().item())
+        reg_value = regularization_loss.detach()
+    
+        if reward_value > eps:
+            scale = 0.1 * reward_value / (regularization_loss + eps)
+        else:
+            scale = 1.0
+    
+        total_loss = reward_loss + scale * regularization_loss
+        return total_loss, scale  # For logging/debugging
 
     def train(self):
         grad_accum_steps = self.config.model.gradient_accumulation_steps

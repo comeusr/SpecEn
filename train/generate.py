@@ -17,108 +17,11 @@ import os
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, parent_dir)
 
-def main(args):
-
-    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
-    accelerator = Accelerator(
-        project_dir=args.local_run_dir,
-        kwargs_handlers=[ddp_kwargs],
-        gradient_accumulation_steps=4,
-    )
-
-    accelerator.print(f"Loading Ensemblemodel and tokenizer from {args.model_path}")
-
-    target_model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-8B", 
-                                                  torch_dtype=torch.bfloat16, 
-                                                  trust_remote_code=True, 
-                                                  attn_implementation="flash_attention_2",
-                                                  device_map='auto')
-
-    draft_model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B", 
-                                                  torch_dtype=torch.bfloat16, 
-                                                  trust_remote_code=True, 
-                                                  attn_implementation="flash_attention_2",
-                                                  device_map='auto')
-
-    model = EnsembleWrapper(target_model, draft_model)
-
-    model.load_ensemble_head(args.model_path)
-
-    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B", trust_remote_code=True)
-    tokenizer.chat_template = open('train_config/template.jinja').read()
-
-    if tokenizer.pad_token_id is None:
-        tokenizer.pad_token_id = tokenizer.eos_token_id
-
-    dataloader = SFTDataLoader(
-                dataset_names=[args.dataset],
-                tokenizer=tokenizer,
-                split=args.split,
-                max_prompt_length=args.max_prompt_length,
-                n_epochs=1,
-                seed=args.seed,
-                microbatch_size=args.batch_size
-            )
-
-    # model = accelerator.prepare(model)
-    # model = target_model
-    accelerator.print(model)
-
-    response_list = []
-
-    for batch in dataloader:
-
-        batch = {k: v.to(accelerator.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
-        
-        input_ids = batch['prompt_input_ids']
-        attn_mask = batch['prompt_attention_mask']
-        # input_ids = tokenizer.encode(batch['prompt_text'][0])
-        # input_ids = torch.tensor([input_ids], dtype=torch.long).to(model.device)
-        
-        # input_ids = tokenizer.en(batch['original_prompt'])['input_ids']
-        print("Debuging input_ids: ", input_ids)
-        # print("Debuging decoded input_ids: ", tokenizer.decode(input_tensor))
-
-        # accelerator.print(batch['prompt'])
-
-        accelerator.print(batch.keys())
-
-        if isinstance(model, EnsembleWrapper):
-            model.reset_cache()
-        output_ids = model.generate(
-            input_ids,
-            attention_mask=attn_mask,
-            max_new_tokens=args.max_tokens,
-            do_sample=False,
-            use_cache=True,
-            temperature=args.temperature if args.temperature > 0 else 1.0,
-            num_beams=1,
-        )
-
-        reply_ids = output_ids[input_ids.shape[-1]:]
-
-        for temp in input_ids:
-            print('Debug printing the length of input: ', len(temp))
-        for temp in output_ids:
-            print('Debug printing the length of output: ', len(temp))
-
-        for question, prompt_ids, ground_true, answer in zip(batch['original_prompt'], batch['prompt_input_ids'], batch['target_text'], output_ids):
-            print('Debug Question: ', question)
-            print('Debug Input: ', tokenizer.decode(prompt_ids, skip_special_tokens=True))
-            # print('Debug Targert Anser: ', ground_true)
-            print('Debug Answer: ', tokenizer.decode(answer, skip_special_tokens=True))
-            
-
-        response = tokenizer.decode(reply_ids, skip_special_tokens=True).strip()
-
-        for prompt, response in zip(batch, output_ids):
-            output = {
-                'generations': tokenizer.batch_decode(output_ids, skip_special_tokens=True),
-                'model_path': args.model_path,
-                'seed': args.seed,
-            }
-            response_list.append(output)            
-
+def extract_first_answer_block(text):
+    split_marker = "Question:"
+    if split_marker in text:
+        return text.split(split_marker, 1)[0].strip()
+    return text.strip()
 
 def find_answer(text):
     match = re.search(r"###\s*(-?\d+)", text.replace(",", ""))
@@ -139,22 +42,22 @@ def main(args):
 
     print(f"Loading Ensemblemodel and tokenizer from {args.model_path}")
 
-    target_model = AutoModelForCausalLM.from_pretrained(
+    model = AutoModelForCausalLM.from_pretrained(
         "Qwen/Qwen3-8B",
         torch_dtype=torch.bfloat16,
         trust_remote_code=True,
         attn_implementation="flash_attention_2",
         device_map='auto'
     )
-    draft_model = AutoModelForCausalLM.from_pretrained(
-        "Qwen/Qwen3-0.6B",
-        torch_dtype=torch.bfloat16,
-        trust_remote_code=True,
-        attn_implementation="flash_attention_2",
-        device_map='auto'
-    )
-    model = EnsembleWrapper(target_model, draft_model, True)
-    model.load_ensemble_head(args.model_path)
+    # draft_model = AutoModelForCausalLM.from_pretrained(
+    #     "Qwen/Qwen3-0.6B",
+    #     torch_dtype=torch.bfloat16,
+    #     trust_remote_code=True,
+    #     attn_implementation="flash_attention_2",
+    #     device_map='auto'
+    # )
+    # model = EnsembleWrapper(target_model, draft_model, True)
+    # model.load_ensemble_head(args.model_path)
 
     tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B", trust_remote_code=True)
     tokenizer.chat_template = open('train_config/template.jinja').read()
@@ -164,8 +67,8 @@ def main(args):
     data_iterator_kwargs = dict(
         process_index=0,
         num_processes=1,
-        max_length=1024,
-        max_prompt_length=800,
+        max_length=1536,
+        max_prompt_length=1152,
         seed=42,
         frac_unique_desirable=1.0,
         frac_unique_undesirable=1.0,
@@ -192,9 +95,12 @@ def main(args):
     for batch in dataloader:
         # print(batch)
         
-        batch = {k: v.to(target_model.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
-        input_ids = batch['prompt_input_ids']
-        attn_mask = batch['prompt_attention_mask']
+        batch = {k: v.to(model.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+        # input_ids = batch['prompt_input_ids']
+        # attn_mask = batch['prompt_attention_mask']
+
+        input_ids = batch['original_prompt_input_ids']
+        attn_mask = batch['original_prompt_attention_mask']
         labels = [answer[0]['content'] for answer in batch['target']]
         prompts = batch['original_prompt']
 
@@ -219,10 +125,17 @@ def main(args):
         all_labels.extend(labels)
 
         for p, g, t in zip(prompts, generations, labels):
+            g = extract_first_answer_block(g)
+            pred = find_answer(g)
+            truth = find_answer(t)
+            label = (pred==truth)
             all_results.append({
                 "prompt": p[0],
                 "generation": g,
-                "ground_truth": t,
+                "pred": pred,
+                "answer": t,
+                "ground_truth": truth,
+                "label": label,
                 "model_path": args.model_path,
                 "seed": args.seed
             })

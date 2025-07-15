@@ -1,0 +1,17 @@
+- loss=reinforce
+- model=qwen
+- datasets=[gsm8k]
+- exp_name=Qwen3-8B_Qwen-06B_reinforce_l2_reg_scale10_target0.6_5e-4
+- lr=5e-4
+- global_epochs=1
+- n_examples=100
+- wandb.project=Ensemble
+- model.name_or_path=Qwen/Qwen3-8B
+- model.max_prompt_length=800
+- cache_dir=/home/sagemaker-user/data/model
+- model.use_peft=false
+- model.batch_size=2
+- model.gradient_accumulation_steps=4
+- model.reg_scale=10
+- model.target_w_draft=0.6
+- model.save_freqs=4

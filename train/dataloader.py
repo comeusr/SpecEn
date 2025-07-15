@@ -51,7 +51,8 @@ class Example:
     truncation_mode: str = 'keep_end'                           # if truncation needed, keep the beginning (keep_start) or end (keep_end) (only override default for SHP)
     dataset_name: str = ''
     original_prompt: str = ''                                   # the unformatted prompt (needed to recover instruction for AlpacaEval)
-
+    question: str=''
+    
     def num_generations(self):
         return len(self.generations)
     
@@ -589,7 +590,8 @@ def get_gsm8k(split: str) -> Dataset:
     for row in dataset:
         key = row['question']
         data[key].prompt = row['prompt']
-        data[key].original_prompt = [row['question']]
+        data[key].original_prompt = [row["original_prompt"]]
+        data[key].question = [row['question']]
         data[key].generations = [row['answer']]
         data[key].sft_index = 0
         data[key].dataset_name = data.name
@@ -711,7 +713,13 @@ class DataLoader:
 
         return padded_batch
 
-    def tokenize_batch_element(self, conversation: List[Dict[str, str]], generation: str, truncation_mode: str, prefix: str='target') -> Dict:
+    def tokenize_batch_element(self, 
+                               conversation: List[Dict[str, str]], 
+                               generation: str, 
+                               truncation_mode: str, 
+                               original_prompt = None, 
+                               prefix: str='target'
+                              ) -> Dict:
         """
         Tokenize a single batch element and truncate if prompt + generation is too long. Batch element is turned into Pytorch 
         tensors in self.collate. Create the labels for the generation, which are of length equal to the sum of the length of 
@@ -736,7 +744,7 @@ class DataLoader:
         total_length = 0
 
 
-         # truncate history to fit in self.max_prompt_length
+        # truncate history to fit in self.max_prompt_length
         for i, turn in enumerate(conversation):
             content_token_ids = filter_out_bos_eos(self.tokenizer.encode(turn['content']))
             # we're only modifying the text in content but need to consider the formatted length
@@ -751,7 +759,7 @@ class DataLoader:
 
         conversation = conversation[:(i+1)]
 
-        # truncate the generation if necessary 
+        # truncate the generation if necessary
         for i, turn in enumerate(generation):
 
             content_token_ids = filter_out_bos_eos(self.tokenizer.encode(turn['content']))
@@ -787,6 +795,13 @@ class DataLoader:
             f'{prefix}_combined_input_ids': tokenized_prompt_and_generation,
             f'{prefix}_combined_attention_mask': [1] * len(tokenized_prompt_and_generation),
         }
+
+        if original_prompt:
+            tokenized_original_prompt = self.tokenizer.encode(original_prompt)
+            batch_element['original_prompt_text'] = original_prompt
+            batch_element['original_prompt_input_ids']  = tokenized_original_prompt
+            batch_element['original_prompt_attention_mask'] = [1]*len(tokenized_original_prompt)
+            
 
         # Prepare labels
         tokenized_prompt = self.tokenizer.apply_chat_template(conversation, tokenize=True, add_generation_prompt=True)
@@ -842,6 +857,7 @@ class SFTDataLoader(DataLoader):
             for example in flat_data:
                 # Assuming example.prompt is now a list of conversation turns
                 conversation = example.prompt
+                original_prompt = example.original_prompt[0]
                 
                 if not isinstance(conversation[0], dict):
                     # Convert to the new format if it's not already
@@ -860,9 +876,10 @@ class SFTDataLoader(DataLoader):
                 batch_element = self.tokenize_batch_element(
                     conversation,
                     target_generation,
-                    example.truncation_mode
+                    example.truncation_mode,
+                    original_prompt=original_prompt
                 )
-                batch_element['original_prompt'] = example.original_prompt
+                batch_element['original_prompt'] = example.question
                 batch.append(batch_element)
 
                 if len(batch) == self.microbatch_size:

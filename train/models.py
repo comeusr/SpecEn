@@ -247,7 +247,7 @@ class EnsembleHead(nn.Module):
         # )
 
         self.summary = nn.Linear(self.hidden_size, 2)
-        torch.nn.init.xavier_uniform_(self.summary.weight)
+        self._equal_init()
         self.summary.to(torch.bfloat16)
 
     def forward(self, hidden_states):
@@ -255,6 +255,12 @@ class EnsembleHead(nn.Module):
             hidden_states = hidden_states.detach().to(torch.float32)
             output = self.summary(hidden_states)
         return output
+
+    def _equal_init(self):
+        with torch.no_grad():
+            w = torch.randn(self.hidden_size) * 0.01 
+            self.summary.weight.copy_(w.repeat(2, 1))
+            self.summary.bias.zero_()
 
 
 class EnsembleWrapper(nn.Module, GenerationMixin):

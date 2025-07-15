@@ -17,6 +17,12 @@ from train.dataloader import SFTDataLoader
 from train.models import EnsembleWrapper
 from train.trainers import ReinforceTrainer
 
+def extract_first_answer_block(text):
+    split_marker = "Question:"
+    if split_marker in text:
+        return text.split(split_marker, 1)[0].strip()
+    return text.strip()
+
 def find_answer(text):
     match = re.search(r"###\s*(-?\d+)", text.replace(",", ""))
     if match:
@@ -29,7 +35,7 @@ def find_answer(text):
 
 def reward_func(completions, ground_truth, **kwargs):
 
-    contents = [find_answer(completion) for completion in completions]
+    contents = [find_answer(extract_first_answer_block(completion)) for completion in completions]
     ground_truth = [find_answer(truth) for truth in ground_truth]
     # Reward 1 if the content is the same as the ground truth, 0 otherwise
     
@@ -126,7 +132,7 @@ def main(config: DictConfig):
     for name, param in model.draft_model.named_parameters():
         param.requires_grad=False
 
-    model.load_ensemble_head('/home/sagemaker-user/data/model/Qwen3-8B_Qwen-06B_sft_5e-4/FINAL')
+    # model.load_ensemble_head('/home/sagemaker-user/data/model/Qwen3-8B_Qwen-06B_sft_5e-4/FINAL')
 
     optimizer = getattr(torch.optim, config.optimizer)(model.parameters(), lr=config.lr)
 
@@ -141,7 +147,7 @@ def main(config: DictConfig):
          optimizer=optimizer,
          scheduler=scheduler,
          train_iterator=train_iterator, 
-         eval_iterator=eval_iterator, 
+         eval_iterator=eval_iterator,
          config=config
     )
 
