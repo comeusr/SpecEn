@@ -111,12 +111,16 @@ class AssistedCandidateGenerator(CandidateGenerator):
         model_kwargs: dict,
         inputs_tensor: Optional[torch.Tensor] = None,
         logits_processor: "LogitsProcessorList" = None,
+        output_hidden: Optional[bool] = None,
     ):
         # Make sure all data at the same device as assistant model
         device = assistant_model.device
         input_ids = input_ids.to(device)
         if inputs_tensor is not None:
             inputs_tensor = inputs_tensor.to(device)
+
+        # output_hidden for the assitant_model or not
+        self.output_hidden = output_hidden
 
         # Prepare the assistant and the starting number of candidate tokens
         self.assistant_model = assistant_model
@@ -190,6 +194,9 @@ class AssistedCandidateGenerator(CandidateGenerator):
         # We need to roll back the cache in assisted generation, only DynamicCache is supported
         self.generation_config.cache_implementation = None
 
+        # Set the output hidden states to True, enable the ensemble heading
+        self.generation_config.output_hidden_states = True
+
         if (
             is_sklearn_available()
             and self.assistant_model.generation_config.assistant_confidence_threshold
@@ -220,8 +227,8 @@ class AssistedCandidateGenerator(CandidateGenerator):
         self._update_past_and_masks(input_ids)
         # Generate candidates
         generation_args = self._prepare_generation_args(input_ids, min_new_tokens, max_new_tokens)
-        candidate_ids, candidate_logits = self._generate_candidates(generation_args)
-        return candidate_ids, candidate_logits
+        candidate_ids, candidate_logits, candidate_hidden_states = self._generate_candidates(generation_args)
+        return candidate_ids, candidate_logits, candidate_hidden_states
 
     def update_candidate_strategy(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, num_matches: int):
         """
@@ -317,7 +324,7 @@ class AssistedCandidateGenerator(CandidateGenerator):
 
     def _generate_candidates(self, generation_args: dict) -> tuple[torch.LongTensor, Optional[torch.FloatTensor]]:
         """Generate candidate sequences using the assistant model."""
-        assistant_output = self.assistant_model.generate(**generation_args, **self.assistant_kwargs)
+        assistant_output = self.assistant_model.generate(**generation_args, **self.assistant_kwargs, return_dict_in_generate=True)
         self.assistant_kwargs["past_key_values"] = assistant_output.past_key_values
         if (
             is_sklearn_available()
@@ -331,7 +338,13 @@ class AssistedCandidateGenerator(CandidateGenerator):
             self.probs.extend(p.tolist())
         candidate_logits = torch.stack(assistant_output.scores, dim=1)
         candidate_ids = assistant_output.sequences
-        return candidate_ids, candidate_logits
+
+        candidate_hidden_states = []
+        for i, hidden_tuple in enumerate(assistant_output.hidden_states):
+            candidate_hidden_states.append(hidden_tuple[-1])
+        candidate_hidden_states = torch.cat(candidate_hidden_states, dim=1).contiguous()
+
+        return candidate_ids, candidate_logits, candidate_hidden_states
 
 
 class AssistedCandidateGeneratorDifferentTokenizers(AssistedCandidateGenerator):

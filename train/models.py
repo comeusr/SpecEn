@@ -250,6 +250,12 @@ class EnsembleHead(nn.Module):
         self._equal_init()
         self.summary.to(torch.bfloat16)
 
+    def _equal_init(self):
+        with torch.no_grad():
+            w = torch.randn(self.hidden_size) * 0.01  # or any scale you prefer
+            self.summary.weight.copy_(w.repeat(2, 1))
+            self.summary.bias.zero_()
+
     def forward(self, hidden_states):
         with torch.autocast(device_type="cuda", dtype=torch.float32):
             hidden_states = hidden_states.detach().to(torch.float32)

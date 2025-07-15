@@ -2260,6 +2260,7 @@ class GenerationMixin(ContinuousMixin):
         negative_prompt_attention_mask: Optional[torch.Tensor] = None,
         use_model_defaults: Optional[bool] = None,
         custom_generate: Optional[str] = None,
+        ensemble_head: Optional[nn.Module] = None,
         **kwargs,
     ) -> Union[GenerateOutput, torch.LongTensor]:
         r"""
@@ -2575,6 +2576,7 @@ class GenerationMixin(ContinuousMixin):
                 generation_config=generation_config,
                 synced_gpus=synced_gpus,
                 streamer=streamer,
+                ensemble_head=ensemble_head,
                 **model_kwargs,
             )
         elif generation_mode == GenerationMode.DOLA_GENERATION:
@@ -3516,6 +3518,7 @@ class GenerationMixin(ContinuousMixin):
         generation_config: GenerationConfig,
         synced_gpus: bool,
         streamer: Optional["BaseStreamer"],
+        output_hidden: Optional[bool] = None,
         **model_kwargs,
     ) -> Union[GenerateNonBeamOutput, torch.LongTensor]:
         r"""
@@ -4840,6 +4843,7 @@ class GenerationMixin(ContinuousMixin):
         generation_config: GenerationConfig,
         synced_gpus: bool,
         streamer: Optional["BaseStreamer"],
+        ensemble_head: Optional[nn.Module] = None,
         **model_kwargs,
     ) -> Union[GenerateNonBeamOutput, torch.LongTensor]:
         r"""
@@ -4912,7 +4916,7 @@ class GenerationMixin(ContinuousMixin):
             cur_len = input_ids.shape[1]
 
             #  1. Fetch candidate sequences from a `CandidateGenerator` and move to the correct device
-            candidate_input_ids, candidate_logits = candidate_generator.get_candidates(input_ids)
+            candidate_input_ids, candidate_logits, draft_candidates_hidden_states = candidate_generator.get_candidates(input_ids)
             candidate_input_ids = candidate_input_ids.to(self.device)
             if candidate_logits is not None:
                 candidate_logits = candidate_logits.to(self.device)
@@ -4950,9 +4954,32 @@ class GenerationMixin(ContinuousMixin):
 
             outputs = self(**model_inputs)
 
+            if ensemble_head:
+
+                target_candidates_hidden_states = outputs.hidden_states[-1][:,-candidate_length-1:-1,:].detach()
+                draft_candidates_hidden_states = draft_candidates_hidden_states[:,-candidate_length:,:]
+                
+                ensemble_input = torch.cat([draft_candidates_hidden_states, target_candidates_hidden_states], dim=-1)
+                ensemble_weights = F.softmax(ensemble_head(ensemble_input), dim=-1)
+                w_draft = ensemble_weights[..., 0].unsqueeze(-1)  # [B, T, 1]
+                w_target = ensemble_weights[..., 1].unsqueeze(-1)
+
+                candidate_logits = candidate_logits.to(ensemble_weights.dtype)
+                target_logits = outputs.logits[:,-candidate_length-1:-1,:].to(ensemble_weights.dtype)
+        
+                logits = candidate_logits.mul(w_draft)
+                logits.add_(target_logits.mul(w_target))
+
+                # Adding back the last logits from the target output
+                logits = torch.cat([logits, outputs.logits[:,-1,:].unsqueeze(dim=1)], dim=1).contiguous()
+
+            else:
+                logits = outputs.logits
+            
+
             # 2.3. Process the new logits
             # .float() is needed to retain precision for later logits manipulations
-            new_logits = outputs.logits[:, -candidate_length - 1 :].to(
+            new_logits = logits[:, -candidate_length - 1 :].to(
                 dtype=torch.float32, device=input_ids.device
             )  # excludes the input prompt if present
             next_token_logits = new_logits.clone()

@@ -10,8 +10,7 @@ huggingface-cli login --token $HF_TOKEN
 
 mkdir -p .logs/$DATA
 
-python -m train.generate \
+python speculative_decoding.py \
     --model_path /home/sagemaker-user/data/model/Qwen3-8B_Qwen-06B_reinforce_equal_init_scale20_5e-4/48 \
-    --dataset $DATA --split test --temperature 0.0 \
-    --max_tokens 1024 --batch_size 4 --n_examples 200 \
-    > .logs/$DATA/Qwen3-8B_Qwen-06B_reinforce_equal_init_scale20_5e-4_48.log 2>&1
+    --dataset $DATA --split test --temperature 0.1 \
+    --max_tokens 1024 --batch_size 1 --n_examples 200 \
