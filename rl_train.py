@@ -63,14 +63,14 @@ def main(config: DictConfig):
         print(f'Writing to {config.local_run_dir}')
         print('=' * 80)
 
-    tokenizer = AutoTokenizer.from_pretrained('Qwen/Qwen3-8B', trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(config.model.target_name_or_path, trust_remote_code=True)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
     special_tokens = []
     # Check if the tokenizer has a chat template and set a default one if it doesn't
     if not tokenizer.chat_template:
-        with open("config/template.jinja") as f:
+        with open("train_config/template.jinja") as f:
             tokenizer.chat_template = f.read()
 
         print("Default chat template set.")
@@ -112,13 +112,13 @@ def main(config: DictConfig):
     )
 
 
-    target_model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-8B", 
+    target_model = AutoModelForCausalLM.from_pretrained(config.model.target_name_or_path, 
                                                   torch_dtype=torch.bfloat16, 
                                                   trust_remote_code=True, 
                                                   attn_implementation="flash_attention_2",
                                                   device_map='auto')
 
-    draft_model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen3-0.6B", 
+    draft_model = AutoModelForCausalLM.from_pretrained(config.model.draft_name_or_path, 
                                                   torch_dtype=torch.bfloat16, 
                                                   trust_remote_code=True, 
                                                   attn_implementation="flash_attention_2",
@@ -131,8 +131,6 @@ def main(config: DictConfig):
 
     for name, param in model.draft_model.named_parameters():
         param.requires_grad=False
-
-    # model.load_ensemble_head('/home/sagemaker-user/data/model/Qwen3-8B_Qwen-06B_sft_5e-4/FINAL')
 
     optimizer = getattr(torch.optim, config.optimizer)(model.parameters(), lr=config.lr)
 

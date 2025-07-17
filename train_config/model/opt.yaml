@@ -1,0 +1,13 @@
+defaults:
+  - base_model
+
+name_or_path: null
+
+#
+draft_name_or_path: null
+
+#
+target_name_or_path: null
+
+block_name: OPTDecoderLayer
+attn_implementation: flash_attention_2

@@ -4922,6 +4922,8 @@ class GenerationMixin(ContinuousMixin):
                 candidate_logits = candidate_logits.to(self.device)
 
             candidate_length = candidate_input_ids.shape[1] - input_ids.shape[1]
+
+            # print("Debuging the candidate length: ", candidate_length)
             is_done_candidate = stopping_criteria(candidate_input_ids, None)
 
             # 2. Use the original model to obtain the next token logits given the candidate sequence. We obtain
@@ -4954,7 +4956,7 @@ class GenerationMixin(ContinuousMixin):
 
             outputs = self(**model_inputs)
 
-            if ensemble_head:
+            if ensemble_head and draft_candidates_hidden_states is not None:
 
                 target_candidates_hidden_states = outputs.hidden_states[-1][:,-candidate_length-1:-1,:].detach()
                 draft_candidates_hidden_states = draft_candidates_hidden_states[:,-candidate_length:,:]

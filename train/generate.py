@@ -42,24 +42,24 @@ def main(args):
 
     print(f"Loading Ensemblemodel and tokenizer from {args.model_path}")
 
-    model = AutoModelForCausalLM.from_pretrained(
-        "Qwen/Qwen3-8B",
+    target_model = AutoModelForCausalLM.from_pretrained(
+        args.target_model,
         torch_dtype=torch.bfloat16,
         trust_remote_code=True,
         attn_implementation="flash_attention_2",
         device_map='auto'
     )
-    # draft_model = AutoModelForCausalLM.from_pretrained(
-    #     "Qwen/Qwen3-0.6B",
-    #     torch_dtype=torch.bfloat16,
-    #     trust_remote_code=True,
-    #     attn_implementation="flash_attention_2",
-    #     device_map='auto'
-    # )
-    # model = EnsembleWrapper(target_model, draft_model, True)
-    # model.load_ensemble_head(args.model_path)
+    draft_model = AutoModelForCausalLM.from_pretrained(
+        args.draft_model,
+        torch_dtype=torch.bfloat16,
+        trust_remote_code=True,
+        attn_implementation="flash_attention_2",
+        device_map='auto'
+    )
+    model = EnsembleWrapper(target_model, draft_model, True)
+    model.load_ensemble_head(args.model_path)
 
-    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B", trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(args.target_model, trust_remote_code=True)
     tokenizer.chat_template = open('train_config/template.jinja').read()
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
@@ -86,8 +86,8 @@ def main(args):
     )
 
     os.makedirs(args.model_path, exist_ok=True)    
-    output_path = os.path.join(args.model_path, "generations.json")
-    metrics_path = os.path.join(args.model_path, "metrics.json")
+    output_path = os.path.join(args.model_path, "en_generations.json")
+    metrics_path = os.path.join(args.model_path, "en_metrics.json")
     
     all_completions, all_labels = [], []
     all_results = []
@@ -169,6 +169,8 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, default='gsm8k')
     parser.add_argument("--local_run_dir", type=str, default='.cache/gsm8k/generation')
     parser.add_argument("--n_examples", type=int, default=8)
+    parser.add_argument("--draft_model", type=str)
+    parser.add_argument("--target_model", type=str)
   
     args = parser.parse_args()
     main(args)

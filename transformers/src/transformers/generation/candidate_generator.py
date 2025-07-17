@@ -40,7 +40,6 @@ if TYPE_CHECKING:
 
 from ..utils.deprecation import deprecate_kwarg
 
-
 class CandidateGenerator:
     """Abstract base class for all candidate generators that can be applied during assisted generation."""
 
@@ -222,7 +221,7 @@ class AssistedCandidateGenerator(CandidateGenerator):
         # Calculate new tokens to generate
         min_new_tokens, max_new_tokens = self._calculate_new_tokens(input_ids)
         if max_new_tokens == 0:
-            return input_ids, None
+            return input_ids, None, None
         # Update past key values and masks
         self._update_past_and_masks(input_ids)
         # Generate candidates
@@ -291,8 +290,9 @@ class AssistedCandidateGenerator(CandidateGenerator):
     def _calculate_new_tokens(self, input_ids: torch.LongTensor) -> tuple[int, int]:
         """Calculate the minimum and maximum number of new tokens to generate."""
         new_cur_len = input_ids.shape[-1]
-        max_new_tokens = min(int(self.num_assistant_tokens), self.generation_config.max_length - new_cur_len - 1)
-        min_new_tokens = max(min(max_new_tokens, self.main_model_min_length - new_cur_len), 0)
+        # max_new_tokens = min(int(self.num_assistant_tokens), self.generation_config.max_length - new_cur_len - 1)
+        # min_new_tokens = max(min(max_new_tokens, self.main_model_min_length - new_cur_len), 0)
+        max_new_tokens = min_new_tokens = self.num_assistant_tokens
         return min_new_tokens, max_new_tokens
 
     def _update_past_and_masks(
@@ -324,6 +324,8 @@ class AssistedCandidateGenerator(CandidateGenerator):
 
     def _generate_candidates(self, generation_args: dict) -> tuple[torch.LongTensor, Optional[torch.FloatTensor]]:
         """Generate candidate sequences using the assistant model."""
+        # print('Debuging the min_new_tokens: ', generation_args["min_new_tokens"])
+        # print('Debuging the max_new_tokens: ', generation_args["max_new_tokens"])
         assistant_output = self.assistant_model.generate(**generation_args, **self.assistant_kwargs, return_dict_in_generate=True)
         self.assistant_kwargs["past_key_values"] = assistant_output.past_key_values
         if (

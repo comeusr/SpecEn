@@ -2,10 +2,13 @@
 LR=5e-4
 DATA=gsm8k
 LOSS=reinforce
-MODEL=qwen
+MODEL=llama
 EPOCH=1
 LAMBDA=10
 TARGET_DRAFT_W=0.3
+CLASS=meta-llama
+DRAFT_MODEL=Llama-3.2-1B-Instruct
+TARGET_MODEL=Llama-3.1-8B-Instruct
 
 export MASTER_ADDR=127.0.0.1
 export MASTER_PORT=$(shuf -i 29500-29600 -n 1)
@@ -14,12 +17,13 @@ wandb login $WANDB_API_KEY
 huggingface-cli login --token $HF_TOKEN
 
 python rl_train.py loss=$LOSS model=$MODEL datasets=[$DATA] \
-    exp_name=Qwen3-8B_Qwen-06B_${LOSS}_equal_l2_reg_scale${LAMBDA}_target${TARGET_DRAFT_W}_${LR} \
+    exp_name=${TARGET_MODEL}_${DRAFT_MODEL}_${LOSS}_equal_l2_reg_scale${LAMBDA}_target${TARGET_DRAFT_W}_${LR} \
     lr=${LR} \
     global_epochs=$EPOCH \
     n_examples=100 \
     wandb.project=Ensemble \
-    model.name_or_path="Qwen/Qwen3-8B" \
+    model.draft_name_or_path=${CLASS}/${DRAFT_MODEL} \
+    model.target_name_or_path=${CLASS}/${TARGET_MODEL} \
     model.max_prompt_length=1152 \
     model.max_length=1536 \
     model.max_tokens=352 \
@@ -30,10 +34,10 @@ python rl_train.py loss=$LOSS model=$MODEL datasets=[$DATA] \
     model.target_w_draft=${TARGET_DRAFT_W} \
     model.save_freqs=4
 
-python -m train.generate \
-    --model_path /home/sagemaker-user/data/model/Qwen3-8B_Qwen-06B_${LOSS}_equal_l2_reg_scale${LAMBDA}_targetdraft${TARGET_DRAFT_W}_${LR}/FINAL \
-    --dataset $DATA --split test --temperature 0.0 \
-    --max_tokens 352 --batch_size 8 --n_examples 200 \
-    > .logs/$DATA/Qwen3-8B_Qwen-06B_${LOSS}_equal_l2_reg_scale${LAMBDA}_target${TARGET_DRAFT_W}_${LR}_FINAL.log 2>&1
+# python -m train.generate \
+#     --model_path /home/sagemaker-user/data/model/${TARGET_MODEL}_${DRAFT_MODEL}_${LOSS}_equal_l2_reg_scale${LAMBDA}_target${TARGET_DRAFT_W}_${LR}/FINAL \
+#     --dataset $DATA --split test --temperature 0.0 \
+#     --max_tokens 352 --batch_size 8 --n_examples 200 \
+#     > .logs/$DATA/Qwen3-8B_Qwen-06B_${LOSS}_equal_l2_reg_scale${LAMBDA}_targetdraft${TARGET_DRAFT_W}_${LR}_FINAL.log 2>&1
 
 
