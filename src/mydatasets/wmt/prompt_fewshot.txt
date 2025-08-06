@@ -1,0 +1,4 @@
+Translate the following English sentences to German.
+
+English: {{en}}
+German:

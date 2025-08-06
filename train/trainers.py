@@ -47,6 +47,31 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 EPS = 1e-8
 
+class RunningRewardBaseline:
+    def __init__(self, momentum=0.9):
+        self.momentum = momentum
+        self.baseline = None  # Scalar
+
+    def update(self, rewards: torch.Tensor):
+        """
+        rewards: Tensor of shape [batch_size]
+        """
+        mean_reward = rewards.mean().item()
+        if self.baseline is None:
+            self.baseline = mean_reward
+        else:
+            self.baseline = (
+                self.momentum * self.baseline + (1 - self.momentum) * mean_reward
+            )
+
+    def get_advantages(self, rewards: torch.Tensor):
+        """
+        rewards: Tensor of shape [batch_size]
+        returns: Tensor of shape [batch_size]
+        """
+        if self.baseline is None:
+            return rewards
+        return rewards - self.baseline
 
 def print_fsdp_param_info(model):
     print(f"{'Module':<40} {'# Params':>12} {'Memory (MB)':>15}")
@@ -889,7 +914,7 @@ class ReinforceTrainer:
         self.target_w_draft=target_w_draft
 
 
-    def _get_batch_metric(self, batch):
+    def _get_batch_metric(self, batch, baseline_tracker=None):
 
         input_ids = batch['original_prompt_input_ids']
         attn_mask = batch['original_prompt_attention_mask']
@@ -901,9 +926,9 @@ class ReinforceTrainer:
                 input_ids,
                 attention_mask=attn_mask,
                 max_new_tokens=self.config.model.max_tokens,
-                do_sample=False,
+                do_sample=self.config.model.do_sample,
                 use_cache=True,
-                temperature=0.0,
+                temperature=self.config.model.temperature,
                 num_beams=1,
             )
             if isinstance(self.model, EnsembleWrapper):
@@ -912,7 +937,8 @@ class ReinforceTrainer:
         reply_ids = output_ids[:, input_ids.shape[-1]:]
         generations = self.tokenizer.batch_decode(reply_ids, skip_special_tokens=True)
 
-        rewards = torch.Tensor(self.reward_fn(generations, target))
+        with torch.no_grad():
+            rewards = torch.Tensor(self.reward_fn(generations, target))
 
 
         # 3. Get logits from model to compute log-probs
@@ -974,8 +1000,13 @@ class ReinforceTrainer:
         
         # 6. Compute REINFORCE loss
         rewards = torch.tensor(rewards, dtype=torch.float32, device=sequence_log_probs.device)
-        rewards = rewards-1
-        reward_loss = -(sequence_log_probs * rewards).mean()
+        if baseline_tracker is None:
+            advantages = rewards-1
+        else:
+            advantages = baseline_tracker.get_advantages(rewards)
+            baseline_tracker.update(rewards)
+
+        reward_loss = -(sequence_log_probs * advantages).mean()
         reg_loss = (w_draft_mean - self.config.model.target_w_draft) ** 2
 
         # Compute dynamic scale
@@ -1006,15 +1037,20 @@ class ReinforceTrainer:
         reg_value = regularization_loss.detach()
     
         if reward_value > eps:
-            scale = 0.1 * reward_value / (regularization_loss + eps)
+            scale = 0.05 * reward_value / (regularization_loss + eps)
         else:
-            scale = 1.0
+            scale = self.config.reg_scale
     
         total_loss = reward_loss + scale * regularization_loss
         return total_loss, scale  # For logging/debugging
 
     def train(self):
         grad_accum_steps = self.config.model.gradient_accumulation_steps
+
+        if self.config.datasets[0] == 'cnndm' or self.config.datasets[0] == 'wmt':
+            baseline_tracker = RunningRewardBaseline()
+        else:
+            baseline_tracker = None
 
         for epoch in range(self.config.global_epochs):
 
@@ -1026,7 +1062,8 @@ class ReinforceTrainer:
                 start_time = time.time()
 
                 batch = {k: v.to(self.model.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
-                loss, metrics = self._get_batch_metric(batch)
+                
+                loss, metrics = self._get_batch_metric(batch, baseline_tracker)
                 
                 loss = loss / grad_accum_steps
                 loss.backward()
@@ -1075,7 +1112,7 @@ class ReinforceTrainer:
 
                 if (batch_idx+1) % self.config.model.save_freqs == 0:
                     self.save(
-                            os.path.join(self.config.local_run_dir, str(batch_idx+1)), 
+                            os.path.join(self.config.local_run_dir, str(self.example_counter)), 
                             metrics={'counter': self.example_counter}
                         )
 

@@ -9,9 +9,11 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 
 from datasets import load_dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+import evaluate
 import torch
 import random
 import wandb
+import sacrebleu
 
 from train.dataloader import SFTDataLoader
 from train.models import EnsembleWrapper
@@ -33,13 +35,39 @@ def find_answer(text):
             return round(float(all_m[-1]))
     return "No answer found"
 
-def reward_func(completions, ground_truth, **kwargs):
+    
+def gsm8k_reward_func(completions, ground_truth, **kwargs):
 
     contents = [find_answer(extract_first_answer_block(completion)) for completion in completions]
     ground_truth = [find_answer(truth) for truth in ground_truth]
     # Reward 1 if the content is the same as the ground truth, 0 otherwise
     
     return [1.0 if c == gt else 0.0 for c, gt in zip(contents, ground_truth)]
+
+def wmt_find_answer(text):
+    return re.split("\n\nEnglish:", text)[0].strip()
+
+def wmt_reward_func(completions, ground_truth):
+    contents = [wmt_find_answer(complete) for complete in completions]
+    reward=[]
+    for i, (content, gt) in enumerate(zip(contents, ground_truth)):
+        reward.append(sacrebleu.sentence_bleu(content, [gt]).score)
+    return reward
+
+
+def cnndm_find_answer(text):
+    return re.split("\n\nArticle:", text)[0]
+    
+def cnndm_reward_func(completions, ground_truth):
+
+    rouge = evaluate.load("rouge")
+    
+    results = []
+    for completion, gt in zip(completions, ground_truth):
+        completion = cnndm_find_answer(completion)
+        results.append(rouge.compute(predictions=[completion], references=[gt])['rouge2'])
+    
+    return results
 
 @hydra.main(version_base=None, config_path="train_config", config_name="config")
 def main(config: DictConfig):
@@ -104,25 +132,29 @@ def main(config: DictConfig):
     eval_iterator = SFTDataLoader(
         config.datasets, 
         tokenizer,
-        split='test',
+        split='validation' if config.datasets[0] == 'wmt' else 'test',
         microbatch_size=config.model.eval_microbatch_size,
         n_examples=config.n_eval_examples, 
         n_epochs=1,
         **data_iterator_kwargs
     )
 
+    device0 = torch.device("cuda:0")
 
     target_model = AutoModelForCausalLM.from_pretrained(config.model.target_name_or_path, 
                                                   torch_dtype=torch.bfloat16, 
                                                   trust_remote_code=True, 
                                                   attn_implementation="flash_attention_2",
-                                                  device_map='auto')
+                                                  device_map='auto'
+                                                  )
 
     draft_model = AutoModelForCausalLM.from_pretrained(config.model.draft_name_or_path, 
                                                   torch_dtype=torch.bfloat16, 
                                                   trust_remote_code=True, 
                                                   attn_implementation="flash_attention_2",
-                                                  device_map='auto')
+                                                #   device_map='auto'
+                                                  ).to(device0)
+
 
     model = EnsembleWrapper(target_model, draft_model, True)
 
@@ -138,13 +170,16 @@ def main(config: DictConfig):
     main_scheduler = CosineAnnealingLR(optimizer, T_max=train_iterator.num_training_steps - config.warmup_steps, eta_min=0)
     scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, main_scheduler], milestones=[config.warmup_steps])
 
+    # Define Reward Functions
+    reward_func = globals()["{}_reward_func".format(config.datasets[0])]
+
     trainer = ReinforceTrainer(
          model=model, 
          tokenizer=tokenizer, 
          reward_fn=reward_func, 
          optimizer=optimizer,
          scheduler=scheduler,
-         train_iterator=train_iterator, 
+         train_iterator=train_iterator,
          eval_iterator=eval_iterator,
          config=config
     )

@@ -73,6 +73,12 @@ reg_scale: 5
 #
 target_w_draft: 0.6
 
+#
+temperature: null
+
+#
+do_sample: True
+
 # whether to load LoRAs from somewhere (should be a path to a directory)
 load_lora_from: null
 

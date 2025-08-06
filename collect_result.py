@@ -29,10 +29,15 @@ def parse_log_file(filepath):
 
     # Extract token counts
     for line in lines:
-        match = re.match(r"\[Accepted Num Tokens\]:\s+(\d+)\s+\[Total Num Tokens\]:\s+(\d+)", line)
-        if match:
-            accepted_tokens += int(match.group(1))
-            total_tokens += int(match.group(2))
+        # match = re.match(r"\[Num Accecpted Tokens\]:\s+(\d+)\s+\[Total Draft Tokens\]:\s+(\d+)", line)
+        # if match:
+        #     accepted_tokens += int(match.group(1))
+        #     total_tokens += int(match.group(2))
+        if "Num Accecpted Tokens" in line:
+            nums = re.findall(r"\d+", line)
+            if len(nums) >= 2:
+                accepted_tokens += int(nums[0])
+                total_tokens  += int(nums[1])
 
     # Try to find the last complete dictionary using brace counting
     brace_count = 0

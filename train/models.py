@@ -235,16 +235,7 @@ class EnsembleHead(nn.Module):
         self.target_hidden_size = target_hidden_size
         self.draft_hidden_size = draft_hidden_size
         self.hidden_size = target_hidden_size+draft_hidden_size
-
-        # self.summary = nn.Sequential(
-        #     nn.Linear(self.hidden_size,self.hidden_size),
-        #     nn.Dropout(summary_dropout_prob) if summary_dropout_prob else nn.Identity(),
-        #     nn.ReLU(),
-        #     nn.Linear(self.hidden_size, self.hidden_size),
-        #     nn.Dropout(summary_dropout_prob) if summary_dropout_prob else nn.Identity(),
-        #     nn.ReLU(),
-        #     nn.Linear(target_hidden_size+draft_hidden_size, 2)
-        # )
+        self.device=None
 
         self.summary = nn.Linear(self.hidden_size, 2)
         self._equal_init()
@@ -258,8 +249,13 @@ class EnsembleHead(nn.Module):
 
     def forward(self, hidden_states):
         with torch.autocast(device_type="cuda", dtype=torch.float32):
-            hidden_states = hidden_states.detach().to(torch.float32)
+            
+            hidden_states = hidden_states.to(dtype=self.summary.weight.dtype)
+            # print("hidden_states_dtype", hidden_states.dtype)
             output = self.summary(hidden_states)
+            # print("output_dtype",output.dtype)
+            # hidden_states = hidden_states.detach().to(torch.float32)
+            # output = self.summary(hidden_states)
         return output
 
     def _equal_init(self):
@@ -276,13 +272,16 @@ class EnsembleWrapper(nn.Module, GenerationMixin):
                  draft_model, 
                  manual_place_head=False,
                  config=None, 
+                 static_draft_weights: Optional[float] = None,
                  **kwargs):
         super().__init__()
         self.target_model = target_model
         self.draft_model = draft_model
+        self.static_draft_weights = static_draft_weights
 
         if manual_place_head:
-            self.ensemble_head = EnsembleHead(target_model.config.hidden_size, draft_model.config.hidden_size).to(self.target_model.device)
+            self.ensemble_head = EnsembleHead(target_model.config.hidden_size, draft_model.config.hidden_size).to(self.draft_model.device)
+            self.ensemble_head.device = self.draft_model.device
         else:
             self.ensemble_head = EnsembleHead(target_model.config.hidden_size, draft_model.config.hidden_size)
 
@@ -310,40 +309,46 @@ class EnsembleWrapper(nn.Module, GenerationMixin):
         **kwargs,
     ):
         with torch.no_grad():
-            draft_output = self.draft_model(input_ids=input_ids, 
+            draft_output = self.draft_model(input_ids=input_ids.to(self.draft_model.device), 
                                             past_key_values=self._draft_past_key_values, 
                                             attention_mask=attention_mask,
                                             use_cache=use_cache,
                                             output_hidden_states=True)
             if use_cache:
                 self._draft_past_key_values = draft_output.past_key_values
-            draft_last_hidden = draft_output.hidden_states[-1].detach()
-            draft_logits = draft_output.logits.detach()
+            draft_last_hidden = draft_output.hidden_states[-1].detach().to(self.ensemble_head.device)
+            draft_logits = draft_output.logits.detach().to(self.ensemble_head.device)
             del draft_output
-            torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()
             
         
         with torch.no_grad():
-            target_output = self.target_model(input_ids=input_ids, 
+            target_output = self.target_model(input_ids=input_ids.to(self.target_model.device), 
                                             past_key_values=self._target_past_key_values,
                                             attention_mask=attention_mask,
                                             use_cache=use_cache,
                                             output_hidden_states=True)
             if use_cache:
                 self._target_past_key_values = target_output.past_key_values
-            target_last_hidden = target_output.hidden_states[-1].detach()
-            target_logits = target_output.logits.detach()
+            target_last_hidden = target_output.hidden_states[-1].detach().to(self.ensemble_head.device)
+            target_logits = target_output.logits.detach().to(self.ensemble_head.device)
             del target_output
-            torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()
 
-        ensemble_input = torch.cat([draft_last_hidden, target_last_hidden], dim=-1)
-        ensemble_weights = F.softmax(self.ensemble_head(ensemble_input), dim=-1)
+        if self.static_draft_weights is not None:
+            shape = list(draft_logits.shape)
+            shape[-1] = 1
+            w_draft = (torch.ones(shape)*self.static_draft_weights).to(self.ensemble_head.device)
+            w_target = 1-w_draft
+        else:
+            ensemble_input = torch.cat([draft_last_hidden, target_last_hidden], dim=-1)
+            ensemble_weights = F.softmax(self.ensemble_head(ensemble_input), dim=-1)
 
-        w_draft = ensemble_weights[..., 0].unsqueeze(-1)  # [B, T, 1]
-        w_target = ensemble_weights[..., 1].unsqueeze(-1)
+            w_draft = ensemble_weights[..., 0].unsqueeze(-1)  # [B, T, 1]
+            w_target = ensemble_weights[..., 1].unsqueeze(-1)
 
-        draft_logits = draft_logits.to(ensemble_weights.dtype)
-        target_logits = target_logits.to(ensemble_weights.dtype)
+        draft_logits = draft_logits.to(w_draft.dtype)
+        target_logits = target_logits.to(w_target.dtype)
 
         logits = draft_logits.mul(w_draft)
         logits.add_(target_logits.mul(w_target))

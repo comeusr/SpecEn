@@ -1,0 +1,34 @@
+This is a document-summarization task. You have to summarize a given document to communicate the overall main point of the document in less than 20 words. Below I give two examples of a document and its corresponding summary.
+
+Example 1: 
+
+Document: A fire alarm went off at the Holiday Inn in Hope Street at about 04:20 BST on Saturday and guests were asked to leave the hotel.
+As they gathered outside they saw the two buses, parked side-by-side in the car park, engulfed by flames.
+One of the tour groups is from Germany, the other from China and Taiwan. It was their first night in Northern Ireland.
+The driver of one of the buses said many of the passengers had left personal belongings on board and these had been destroyed.
+Both groups have organised replacement coaches and will begin their tour of the north coast later than they had planned.
+Police have appealed for information about the attack.
+Insp David Gibson said: "It appears as though the fire started under one of the buses before spreading to the second.
+"While the exact cause is still under investigation, it is thought that the fire was started deliberately."
+
+Summary: Two tourist buses have been destroyed by fire in a suspected arson attack in Belfast city centre.
+
+Example 2:
+
+Document: Patients and staff were evacuated from Cerahpasa hospital on Wednesday after a man receiving treatment at the clinic threatened to shoot himself and others.
+Officers were deployed to negotiate with the man, a young police officer.
+Earlier reports that the armed man had taken several people hostage proved incorrect.
+The chief consultant of Cerahpasa hospital, Zekayi Kutlubay, who was evacuated from the facility, said that there had been "no hostage crises", adding that the man was "alone in the room".
+Dr Kutlubay said that the man had been receiving psychiatric treatment for the past two years.
+He said that the hospital had previously submitted a report stating that the man should not be permitted to carry a gun.
+"His firearm was taken away," Dr Kutlubay said, adding that the gun in the officer's possession on Wednesday was not his issued firearm.
+The incident comes amid tension in Istanbul following several attacks in crowded areas, including the deadly assault on the Reina nightclub on New Year's Eve which left 39 people dead.
+
+Summary: An armed man who locked himself into a room at a psychiatric hospital in Istanbul has ended his threat to kill himself, Turkish media report.
+
+
+Based on how the above two example documents are summarized, please summarize the main point of the below document in a maximum of 1-2 sentences, in less than overall 20 words, just like the above examples. Don't add anything else after the summarization.
+
+Document: {{document}}
+
+Summary: 

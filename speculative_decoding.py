@@ -10,9 +10,16 @@ from train.models import EnsembleWrapper, EnsembleHead
 import torch
 import time
 import numpy as np
+import evaluate
 
 import sys
 import os
+
+def cnndm_find_answer(text):
+    return re.split("\n\nArticle:", text)[0].strip()
+
+def xsum_find_answer(text):
+    return re.split("\n\nDocument:", text)[0].strip()
 
 # Add the parent directory to sys.path
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -41,17 +48,16 @@ def reward_func(completions, ground_truth, **kwargs):
 
 def main(args):
 
-    print(f"Loading Ensemblemodel and tokenizer from {args.model_path}")
-
     device1 = torch.device("cuda:0")
+
+    do_sample = (args.do_sample=="True")
 
     model = AutoModelForCausalLM.from_pretrained(
         args.target_model,
         torch_dtype=torch.bfloat16,
         trust_remote_code=True,
         attn_implementation="flash_attention_2",
-        device_map='auto'
-    )
+    ).to(device1)
 
     if args.method == "sd":
         draft_model = AutoModelForCausalLM.from_pretrained(
@@ -60,11 +66,12 @@ def main(args):
             trust_remote_code=True,
             attn_implementation="flash_attention_2",
         ).to(device1)
-        # draft_model.generation_config.do_sample = False
+        draft_model.generation_config.do_sample = do_sample
         draft_model.generation_config.temperature = args.temperature
         draft_model.generation_config.is_assistant=True
-        draft_model.generation_config.num_assistant_tokens=5
+        draft_model.generation_config.num_assistant_tokens=args.num_assistant_tokens
         ensemble_head = None
+        draft_ensemble_weights = None
     elif args.method == "sd_en":
         draft_model = AutoModelForCausalLM.from_pretrained(
             args.draft_model,
@@ -72,17 +79,33 @@ def main(args):
             trust_remote_code=True,
             attn_implementation="flash_attention_2",
         ).to(device1)
-        # draft_model.generation_config.do_sample = False
+        draft_model.generation_config.do_sample = do_sample
         draft_model.generation_config.temperature = args.temperature
         draft_model.generation_config.is_assistant=True
-        draft_model.generation_config.num_assistant_tokens=5
+        draft_model.generation_config.num_assistant_tokens=args.num_assistant_tokens
         ensemble_head = EnsembleHead(target_hidden_size=model.config.hidden_size, draft_hidden_size=draft_model.config.hidden_size)
         head_path = os.path.join(args.model_path, "ensemble_head.bin")
+        print(f"Loading Ensemblemodel and tokenizer from {args.model_path}")
         ensemble_head.load_state_dict(torch.load(head_path))
         ensemble_head = ensemble_head.to(model.device)
+        draft_ensemble_weights = None
+    elif args.method == "static_en":
+        draft_model = AutoModelForCausalLM.from_pretrained(
+            args.draft_model,
+            torch_dtype=torch.bfloat16,
+            trust_remote_code=True,
+            attn_implementation="flash_attention_2",
+        ).to(device1)
+        draft_model.generation_config.do_sample = do_sample
+        draft_model.generation_config.temperature = args.temperature
+        draft_model.generation_config.is_assistant=True
+        draft_model.generation_config.num_assistant_tokens=args.num_assistant_tokens
+        draft_ensemble_weights = args.draft_ensemble_weights
+        ensemble_head = None
     else:
         draft_model = None
         ensemble_head = None
+        draft_ensemble_weights = None
 
 
     tokenizer = AutoTokenizer.from_pretrained(args.target_model, trust_remote_code=True)
@@ -112,8 +135,8 @@ def main(args):
     )
 
     os.makedirs(args.model_path, exist_ok=True)    
-    output_path = os.path.join(args.model_path, "{}_generations.json".format(args.method))
-    metrics_path = os.path.join(args.model_path, "{}_metrics.json".format(args.method))
+    output_path = os.path.join(args.model_path, "{}_{}_generations.json".format(args.method, args.draft_ensemble_weights))
+    metrics_path = os.path.join(args.model_path, "{}_{}_metrics.json".format(args.method, args.draft_ensemble_weights))
     
     all_completions, all_labels = [], []
     all_results = []
@@ -140,13 +163,14 @@ def main(args):
                 input_ids,
                 attention_mask=attn_mask,
                 max_new_tokens=args.max_tokens,
-                do_sample=False,
+                do_sample=do_sample,
                 use_cache=True,
                 assistant_model=draft_model,
                 output_hidden_states=True,
                 temperature=args.temperature if args.temperature > 0 else 1.0,
                 num_beams=1,
                 ensemble_head=ensemble_head,
+                static_ensemble_draft_weight=draft_ensemble_weights,
             )
             end_time = time.time()
 
@@ -162,29 +186,67 @@ def main(args):
         all_completions.extend(generations)
         all_labels.extend(labels)
 
+        if args.dataset == 'cnndm':
+            rouge = evaluate.load('rouge')
+
+        if args.dataset == 'xsum':
+            rouge = evaluate.load('rouge')
+
         for p, g, t in zip(prompts, generations, labels):
-            g = extract_first_answer_block(g)
-            pred = find_answer(g)
-            truth = find_answer(t)
-            label = (pred==truth)
-            all_results.append({
-                "prompt": p[0],
-                "generation": g,
-                "pred": pred,
-                "answer": t,
-                "ground_truth": truth,
-                "label": label,
-                "model_path": args.model_path,
-                "seed": args.seed
-            })
+            if args.dataset == "gsm8k":
+                g = extract_first_answer_block(g)
+                pred = find_answer(g)
+                truth = find_answer(t)
+                label = (pred==truth)
+                all_results.append({
+                    "prompt": p[0],
+                    "generation": g,
+                    "pred": pred,
+                    "answer": t,
+                    "ground_truth": truth,
+                    "label": label,
+                    "model_path": args.model_path,
+                    "seed": args.seed
+                })
+            elif args.dataset == "cnndm":
+                g = cnndm_find_answer(g)
+                metric = rouge.compute(predictions=[g], references=[t])
+                all_results.append({
+                    "prompt": p[0],
+                    "generation": g,
+                    "reference": t,
+                    "metric": metric,
+                })
+            elif args.dataset == "xsum":
+                g = xsum_find_answer(g)
+                metric = rouge.compute(predictions=[g], references=[t])
+                all_results.append({
+                    "prompt": p[0],
+                    "generation": g,
+                    "reference": t,
+                    "metric": metric,
+                })
+
 
     # Dump all results at once as a JSON array
     with open(output_path, "w") as f:
         json.dump(all_results, f, indent=2)
 
-    acc = sum(reward_func(all_completions, all_labels)) / len(all_labels)
+    if args.dataset == 'gsm8k':
+        acc = sum(reward_func(all_completions, all_labels)) / len(all_labels)
+        with open(metrics_path, "w") as f:
+            json.dump({"accuracy": acc}, f, indent=2)
+    elif args.dataset == "cnndm":
+        metrics = rouge.compute(predictions=all_completions, references=all_labels)
+        with open(metrics_path, "w") as f:
+            json.dump(metrics, f, indent=2)
+    elif args.dataset == "xsum":
+        metrics = rouge.compute(predictions=all_completions, references=all_labels)
+        with open(metrics_path, "w") as f:
+            json.dump(metrics, f, indent=2)
+
     result_stats = {
-        "acc": acc,
+        "performance": metrics,
         "num_tokens_per_sec": np.mean(all_metrics["num_tokens_per_sec"]),
         "total_time": np.mean(all_metrics["total_time"]),
         "num_tokens": np.mean(all_metrics["num_tokens"]),
@@ -194,8 +256,9 @@ def main(args):
         json.dump(result_stats, f, indent=2)
 
     print(f"Saved generations to {output_path}")
-    print(f"Saved accuracy: {acc:.4f} to {metrics_path}")
     print(result_stats)
+    print(f"Saved Metrics to {metrics_path}")
+
 
 if __name__ == "__main__":
 
@@ -218,7 +281,10 @@ if __name__ == "__main__":
     parser.add_argument("--draft_len", type=int, default=5)
     parser.add_argument("--draft_model", type=str)
     parser.add_argument("--target_model", type=str)
-    parser.add_argument("--method", type=str, default="sd")
+    parser.add_argument("--method", type=str, default="sd", choices=['sd', 'sd_en', 'auto', 'static_en'])
+    parser.add_argument("--draft_ensemble_weights", type=float, default=0.5, help="The static ensemble weights for draft model, only useful when method is static_en.")
+    parser.add_argument("--num_assistant_tokens", type=int, default=10)
+    parser.add_argument('--do_sample', type=str, choices=["True", "False"], help="Do Sample for the ensemble task.")
         
     args = parser.parse_args()
     main(args)

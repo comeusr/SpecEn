@@ -533,11 +533,152 @@ def get_ultrachat(split: str) -> Dataset:
     return data
 
 
-def get_gsm8k(split: str) -> Dataset:
+def get_cnndm(split, n_examples: Optional[int] = None) -> Dataset:
+    rank0_print(f'Loading CNNDM dataset ({split} split).')
+    dataset = datasets.load_dataset("abisee/cnn_dailymail", "3.0.0", split=split)
+
+    few_shot_example_path = "./src/mydatasets/cnndm/prompt_fewshot.txt"
+
+    def attach_template(dataset, template_path=few_shot_example_path):
+
+        template = Template(read_txt(template_path))
+        result = []
+
+        for data in dataset:
+            answer = {"role": "assistant", "content": data['highlights']}
+
+            result.append({
+                "id": data["id"],
+                'article': data["article"],
+                "prompt": template.render(**data),
+                "reference": answer
+            })
+        return result
+
+    dataset = attach_template(dataset)
+
+    if on_rank0():
+        dataset = tqdm.tqdm(dataset, desc='Processing CNNDM')
+        
+    data = Dataset("CNNDM")
+
+    for row in dataset:
+        key = row['id']
+        data[key].prompt = [row['prompt']]
+        data[key].question = [row['article']]
+        data[key].original_prompt = [row['prompt']]
+        data[key].generations=[row["reference"]]
+        data[key].sft_index = 0
+        data[key].dataset_name = data.name
+        data[key].truncation_mode = 'target'
+
+    return data
+
+
+
+
+def get_xsum(split, n_examples: Optional[int] = None) -> Dataset:
+    rank0_print(f'Loading XSUM dataset ({split} split).')
+    # dataset = datasets.load_dataset("abisee/cnn_dailymail", "3.0.0", split=split)
+    dataset = datasets.load_dataset("EdinburghNLP/xsum", split=split)
+    
+    few_shot_example_path = "./src/mydatasets/xsum/prompt_fewshot.txt"
+
+    def attach_template(dataset, template_path=few_shot_example_path):
+
+        template = Template(read_txt(template_path))
+        result = []
+
+        for data in dataset:
+            answer = {"role": "assistant", "content": data['summary']}
+
+            result.append({
+                "id": data["id"],
+                'article': data["document"],
+                "prompt": template.render(**data),
+                "reference": answer
+            })
+        return result
+
+    dataset = attach_template(dataset)
+
+    if on_rank0():
+        dataset = tqdm.tqdm(dataset, desc='Processing XSUM')
+        
+    data = Dataset("XSUM")
+
+    for row in dataset:
+        key = row['id']
+        data[key].prompt = [row['prompt']]
+        data[key].question = [row['article']]
+        data[key].original_prompt = [row['prompt']]
+        data[key].generations=[row["reference"]]
+        data[key].sft_index = 0
+        data[key].dataset_name = data.name
+        data[key].truncation_mode = 'target'
+
+    return data
+
+
+
+
+
+
+
+def get_wmt(split: str, n_examples: Optional[int] = None) -> Dataset:
+    rank0_print(f'Loading WMT dataset ({split} split) from Huggingface...')
+    dataset = datasets.load_dataset("wmt/wmt19", "de-en", split=split)
+
+    data = Dataset("wmt")
+
+    prefix_prompt = "Translate the following English sentences to German."
+
+    few_shot_example_path = "./src/mydatasets/wmt/prompt_fewshot.txt"
+
+    def attach_template(dataset, template_path=few_shot_example_path, n_examples=n_examples):
+
+        template = Template(read_txt(template_path))
+
+        result = []
+        count = 0
+
+        for data in dataset:
+            data=data['translation']
+            answer = {"role": "assistant", "content": data['de']}
+
+            result.append({
+                'prompt': template.render(**data),
+                'reference': answer,
+                'english': data['en']
+            })
+            count += 1
+            if count == n_examples:
+                break
+        
+        return result
+    
+    dataset = attach_template(dataset)
+    
+    for row in dataset:
+        key = row['english']
+        data[key].prompt = [row['prompt']]
+        data[key].original_prompt = [row['prompt']]
+        data[key].generations = [row['reference']]
+        data[key].question = [row['english']]
+        data[key].sft_index = 0
+        data[key].dataset_name = data.name
+        data[key].truncation_mode = 'target'
+
+    return data
+
+
+        
+
+def get_gsm8k(split: str, n_examples: Optional[int] = None) -> Dataset:
     rank0_print(f'Loading GSM8K dataset ({split} split) from Huggingface...')
     dataset = datasets.load_dataset("openai/gsm8k", "main", split=split)
 
-    few_shot_example_path = "/home/sagemaker-user/SpecEn/src/mydatasets/gsm8k/prompt_fewshot.txt"
+    few_shot_example_path = "./src/mydatasets/gsm8k/prompt_fewshot.txt"
 
 
     def parse_prompt_to_conversation(prompt_text):
@@ -645,7 +786,11 @@ class DataLoader:
 
         for name in dataset_names:
             if f"get_{name}" in globals():
-                dataset = globals()[f"get_{name}"](split)
+                if name == 'wmt':
+                    n_examples = self.n_examples
+                else:
+                    n_examples = None
+                dataset = globals()[f"get_{name}"](split, n_examples)
                 self.full_data.update(dataset.data)
             else:
                 try:
@@ -1276,20 +1421,25 @@ class PairedPreferenceDataLoader(DataLoader):
 if __name__ == "__main__":
     from transformers import AutoTokenizer
     
-    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B", trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.1-8B-Instruct", trust_remote_code=True)
+    tokenizer.pad_token_id = tokenizer.eos_token_id
     
-    gsm8k_data = SFTDataLoader(
-        ['gsm8k'],
+    wmt_data = SFTDataLoader(
+        ['wmt'],
         tokenizer,
-        split='train',
-        microbatch_size=4,
+        split='validation',
+        microbatch_size=1,
         n_epochs=1,
     )
 
-    count = 0
+    # data = get_wmt(split='train')
 
-    for batch in gsm8k_data:
-        if count == 5:
-            break
-        count += 1
+    # for batch in wmt_data:
+    #     print(batch['original_prompt_input_ids'])
+    #     print(batch['original_prompt_attention_mask'])
+    #     target = [answer[0]['content'] for answer in batch['target']]
+    #     print(batch['original_prompt'])
+    #     print(target)
+
+    #     break
         
