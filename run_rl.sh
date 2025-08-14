@@ -4,17 +4,22 @@ OPTIMIZER=AdamW
 LR=5e-4
 DATA=wmt
 LOSS=reinforce
-MODEL=llama
+MODEL=gemma # llama
 EPOCH=2
 LAMBDA=10
 TARGET_DRAFT_W=0.5
-CLASS=meta-llama
-DRAFT_MODEL=Llama-3.2-1B-Instruct
-TARGET_MODEL=Llama-3.1-8B-Instruct
+CLASS=google # meta-llama
+DRAFT_MODEL=gemma-3-4b-it # Llama-3.2-1B-Instruct
+TARGET_MODEL=gemma-3-12b-it # Llama-3.1-8B-Instruct
 TEMP=0.0
 
-export WANDB_API_KEY=c06454b9d39ecbc38415f676534da6704a3050c0
-export HF_TOKEN=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
+# Load environment variables from .env file
+if [ -f .env ]; then
+  export $(grep -v '^#' .env | xargs)
+else
+  echo "Error: .env file not found. Please create it with your API tokens."
+  exit 1
+fi
 
 export MASTER_ADDR=127.0.0.1
 export MASTER_PORT=$(shuf -i 29500-29600 -n 1)
@@ -22,8 +27,12 @@ export MASTER_PORT=$(shuf -i 29500-29600 -n 1)
 wandb login $WANDB_API_KEY
 huggingface-cli login --token $HF_TOKEN
 
+    # model.max_prompt_length=512 \ # max length of the prompt, if less than this you do a left padding otherwise truncate
+    # model.max_length=640 \ prompt + generation < max_length
+    # model.max_tokens=128 \ generation alone 
+
 python rl_train.py loss=$LOSS model=$MODEL datasets=[$DATA] optimizer=$OPTIMIZER \
-    exp_name=${TARGET_MODEL}_${DRAFT_MODEL}_TEMP${TEMP}_${LOSS}_${OPTIMIZER}_reg_scale${LAMBDA}_target${TARGET_DRAFT_W}_${LR} \
+    exp_name=${TARGET_MODEL}_${DRAFT_MODEL}_13Aug_TEMP${TEMP}_${LOSS}_${OPTIMIZER}_reg_scale${LAMBDA}_target${TARGET_DRAFT_W}_${LR} \
     lr=${LR} \
     global_epochs=$EPOCH \
     n_examples=400 \

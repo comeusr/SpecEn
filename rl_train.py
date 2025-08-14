@@ -144,16 +144,16 @@ def main(config: DictConfig):
     target_model = AutoModelForCausalLM.from_pretrained(config.model.target_name_or_path, 
                                                   torch_dtype=torch.bfloat16, 
                                                   trust_remote_code=True, 
-                                                  attn_implementation="flash_attention_2",
+                                                  attn_implementation=config.model.attn_implementation, # Ziyi changed this
                                                   device_map='auto'
                                                   )
 
     draft_model = AutoModelForCausalLM.from_pretrained(config.model.draft_name_or_path, 
                                                   torch_dtype=torch.bfloat16, 
                                                   trust_remote_code=True, 
-                                                  attn_implementation="flash_attention_2",
-                                                #   device_map='auto'
-                                                  ).to(device0)
+                                                  attn_implementation=config.model.attn_implementation,
+                                                  device_map='auto'
+                                                  )
 
 
     model = EnsembleWrapper(target_model, draft_model, True)

@@ -22,8 +22,13 @@ ITER=264
 N_EXAMPLES=500
 DO_SAMPLE=True
 
-export WANDB_API_KEY=c06454b9d39ecbc38415f676534da6704a3050c0
-export HF_TOKEN=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
+# Load environment variables from .env file
+if [ -f .env ]; then
+  export $(grep -v '^#' .env | xargs)
+else
+  echo "Error: .env file not found. Please create it with your API tokens."
+  exit 1
+fi
 export TRANSFORMERS_VERBOSITY=error
 
 wandb login $WANDB_API_KEY

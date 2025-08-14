@@ -1,0 +1,8 @@
+{
+  "performance": {
+    "accuracy": 0.65625
+  },
+  "num_tokens_per_sec": 27.27843564748764,
+  "total_time": 9.628878146409988,
+  "num_tokens": 259.59375
+}

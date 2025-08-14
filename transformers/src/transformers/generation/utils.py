@@ -2018,11 +2018,12 @@ class GenerationMixin(ContinuousMixin):
         # b) convert to the new cache format (if the user passes a legacy cache and model supports it)
         user_defined_cache = model_kwargs.get(cache_name)
         if user_defined_cache is not None:
-            if generation_config.cache_implementation is not None:
-                raise ValueError(
-                    f"Passing both `cache_implementation` (used to initialize certain caches) and `{cache_name}` (a "
-                    "Cache object) is unsupported. Please use only one of the two."
-                )
+            # Modified by ziyi, for runing gemma model.
+            # if generation_config.cache_implementation is not None:
+            #     raise ValueError(
+            #         f"Passing both `cache_implementation` (used to initialize certain caches) and `{cache_name}` (a "
+            #         "Cache object) is unsupported. Please use only one of the two."
+            #     )
             if isinstance(user_defined_cache, tuple) and self._supports_default_dynamic_cache():
                 model_kwargs[cache_name] = (
                     DynamicCache.from_legacy_cache(user_defined_cache)
@@ -4915,16 +4916,34 @@ class GenerationMixin(ContinuousMixin):
 
         this_peer_finished = False
         is_first_iteration = True  # to preserve the same API in the output as other generation methods
+        # Added by ziyi 
+        # all_candidate_ids = []
+        # all_target_ids = []
+        # all_valid_ids = []
+        # all_target_logits = []
+        # all_draft_logits = []
+        # 
+
         while self._has_unfinished_sequences(this_peer_finished, synced_gpus, device=input_ids.device):
             cur_len = input_ids.shape[1]
 
             #  1. Fetch candidate sequences from a `CandidateGenerator` and move to the correct device
             candidate_input_ids, candidate_logits, draft_candidates_hidden_states = candidate_generator.get_candidates(input_ids)
+            
             candidate_input_ids = candidate_input_ids.to(self.device)
             if candidate_logits is not None:
                 candidate_logits = candidate_logits.to(self.device)
 
             candidate_length = candidate_input_ids.shape[1] - input_ids.shape[1]
+
+            # Added by ziyi, try to store all candaites
+            # all_candidate_ids.append(candidate_input_ids[0, -candidate_length:].tolist())
+            # candidates_logits, candidates_indices = torch.topk(candidate_logits, k=3, dim=-1)
+            # all_draft_logits.append({
+            #     'logits': candidates_logits,
+            #     'indices': candidates_indices
+            # })
+            #
 
             # print("Debuging the candidate length: ", candidate_length)
             is_done_candidate = stopping_criteria(candidate_input_ids, None)
@@ -5027,6 +5046,14 @@ class GenerationMixin(ContinuousMixin):
                 else:
                     selected_tokens = new_logits.argmax(dim=-1)
 
+                    # Added by ziyi
+                    # topk_logits, topk_indices = torch.topk(new_logits, k=3, dim=-1)
+                    # all_target_logits.append({
+                    #     "logits": topk_logits,
+                    #     "indices": topk_indices,
+                    # })
+
+
                 candidate_new_tokens = candidate_input_ids[:, cur_len:]
                 n_matches = ((~(candidate_new_tokens == selected_tokens[:, :-1])).cumsum(dim=-1) < 1).sum()
 
@@ -5034,6 +5061,10 @@ class GenerationMixin(ContinuousMixin):
                 if is_done_candidate and n_matches == candidate_length:
                     n_matches -= 1
                 valid_tokens = selected_tokens[:, : n_matches + 1]
+
+                # Added by Ziyi
+                # all_target_ids.append(selected_tokens[0,:].tolist())
+                # all_valid_ids.append(valid_tokens[0,:].tolist())
 
 
             print("[Num Accecpted Tokens]: {}, [Total Draft Tokens]: {}".format(n_matches, candidate_length))
@@ -5110,6 +5141,14 @@ class GenerationMixin(ContinuousMixin):
             unfinished_sequences = unfinished_sequences & ~stopping_criteria(input_ids, scores)
             this_peer_finished = unfinished_sequences.max() == 0
             is_first_iteration = False
+
+        # Added by ziyi:
+
+        # print("Debug all generated candidates: ", all_candidate_ids)
+        # print("Debug al target select candidates: ", all_target_ids)
+        # print("Debug all valid tokens: ", all_valid_ids)
+        # print("Debug all target logits: ", all_target_logits)
+        # print("Debug all draft logits: ", all_draft_logits)
 
         if streamer is not None:
             streamer.end()

@@ -621,10 +621,6 @@ def get_xsum(split, n_examples: Optional[int] = None) -> Dataset:
 
 
 
-
-
-
-
 def get_wmt(split: str, n_examples: Optional[int] = None) -> Dataset:
     rank0_print(f'Loading WMT dataset ({split} split) from Huggingface...')
     dataset = datasets.load_dataset("wmt/wmt19", "de-en", split=split)
@@ -893,6 +889,7 @@ class DataLoader:
         for i, turn in enumerate(conversation):
             content_token_ids = filter_out_bos_eos(self.tokenizer.encode(turn['content']))
             # we're only modifying the text in content but need to consider the formatted length
+            
             templated_length = len(self.tokenizer.apply_chat_template([turn], tokenize=True, add_generation_prompt=True))
             
             if total_length + templated_length > self.max_prompt_length:
@@ -909,7 +906,10 @@ class DataLoader:
 
             content_token_ids = filter_out_bos_eos(self.tokenizer.encode(turn['content']))
             # we're only modifying the text in content but need to consider the formatted length
-            templated_length = len(self.tokenizer.apply_chat_template([turn], tokenize=True, add_generation_prompt=False))
+            if type(self.tokenizer).__name__ == "GemmaTokenizerFast":
+                templated_length = len(self.tokenizer(turn['content']))
+            else:
+                templated_length = len(self.tokenizer.apply_chat_template([turn], tokenize=True, add_generation_prompt=True))
             
             if total_length + templated_length > self.max_length:
                 turn['content'] = self.tokenizer.decode(content_token_ids[:self.max_length - (total_length + templated_length)])
@@ -935,7 +935,7 @@ class DataLoader:
             'prompt_text': untruncated_prompt_string,
             'prompt_input_ids': tokenized_prompt,
             'prompt_attention_mask': [1]*len(tokenized_prompt),
-            f'{prefix}_text': self.tokenizer.apply_chat_template(generation, tokenize=False),
+            f'{prefix}_text': self.tokenizer(generation[0]['content']) if type(self.tokenizer).__name__ == "GemmaTokenizerFast" else self.tokenizer.apply_chat_template(generation, tokenize=False),
             f'{prefix}_combined_text': tokenized_prompt_and_generation_string,
             f'{prefix}_combined_input_ids': tokenized_prompt_and_generation,
             f'{prefix}_combined_attention_mask': [1] * len(tokenized_prompt_and_generation),

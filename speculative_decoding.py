@@ -56,7 +56,8 @@ def main(args):
         args.target_model,
         torch_dtype=torch.bfloat16,
         trust_remote_code=True,
-        attn_implementation="flash_attention_2",
+        attn_implementation="eager" if 'gemma' in args.target_model else "flash_attention_2", # Modified by Ziyi
+        # attn_implementation="flash_attention_2"
     ).to(device1)
 
     if args.method == "sd":
@@ -64,7 +65,8 @@ def main(args):
             args.draft_model,
             torch_dtype=torch.bfloat16,
             trust_remote_code=True,
-            attn_implementation="flash_attention_2",
+            attn_implementation="eager" if 'gemma' in args.target_model else "flash_attention_2", # Modified by Ziyi
+            # attn_implementation="flash_attention_2"
         ).to(device1)
         draft_model.generation_config.do_sample = do_sample
         draft_model.generation_config.temperature = args.temperature
@@ -77,7 +79,8 @@ def main(args):
             args.draft_model,
             torch_dtype=torch.bfloat16,
             trust_remote_code=True,
-            attn_implementation="flash_attention_2",
+            attn_implementation="eager" if 'gemma' in args.target_model else "flash_attention_2", # Modified by Ziyi
+            # attn_implementation="flash_attention_2"
         ).to(device1)
         draft_model.generation_config.do_sample = do_sample
         draft_model.generation_config.temperature = args.temperature
@@ -94,7 +97,8 @@ def main(args):
             args.draft_model,
             torch_dtype=torch.bfloat16,
             trust_remote_code=True,
-            attn_implementation="flash_attention_2",
+            attn_implementation="eager" if 'gemma' in args.target_model else "flash_attention_2", # Modified by Ziyi
+             # attn_implementation="flash_attention_2"
         ).to(device1)
         draft_model.generation_config.do_sample = do_sample
         draft_model.generation_config.temperature = args.temperature

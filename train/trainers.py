@@ -964,6 +964,11 @@ class ReinforceTrainer:
         
         # 3. Compute token-level log probs
         log_probs = F.log_softmax(logits_gen, dim=-1)                                   # [B, T_gen, V]
+        print("Debug device: ", log_probs.device, target_ids_gen.device)
+        # Move target_ids_gen to the same device as log_probs
+        target_ids_gen = target_ids_gen.to(log_probs.device)
+        # Make sure gen_attention_mask is also on the same device
+        gen_attention_mask = gen_attention_mask.to(log_probs.device)
         token_log_probs = torch.gather(log_probs, 2, target_ids_gen.unsqueeze(-1)).squeeze(-1)  # [B, T_gen]
         
         # 4. Apply padding mask and sum
@@ -971,6 +976,10 @@ class ReinforceTrainer:
         sequence_log_probs = masked_log_probs.sum(dim=1)                               # [B]
 
         # 5. Compute the regularization
+
+        # Make sure w_draft and w_target are on the same device as gen_attention_mask
+        w_draft = w_draft.to(log_probs.device)
+        w_target = w_target.to(log_probs.device)
 
         if isinstance(self.model, EnsembleWrapper) and self.log_ensemble_weights:
             w_draft_mean = (w_draft.squeeze(-1) * gen_attention_mask).sum() / gen_attention_mask.sum()
@@ -999,7 +1008,8 @@ class ReinforceTrainer:
 
         
         # 6. Compute REINFORCE loss
-        rewards = torch.tensor(rewards, dtype=torch.float32, device=sequence_log_probs.device)
+        # Make sure rewards is on the same device as sequence_log_probs
+        rewards = torch.tensor(rewards, dtype=torch.float32, device=log_probs.device)
         if baseline_tracker is None:
             advantages = rewards-1
         else:
@@ -1137,8 +1147,3 @@ class ReinforceTrainer:
         self.model.save_pretrained(
             output_dir,
         )
-                
-
-                
-
-        

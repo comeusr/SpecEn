@@ -22,6 +22,7 @@ from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutpu
 from transformers.generation import GenerationMixin
 from transformers.utils import ModelOutput
 from transformers.cache_utils import Cache
+from transformers.models.gemma3.configuration_gemma3 import Gemma3Config
 
 
 from accelerate.utils import gather_object
@@ -279,20 +280,48 @@ class EnsembleWrapper(nn.Module, GenerationMixin):
         self.draft_model = draft_model
         self.static_draft_weights = static_draft_weights
 
+        self.target_hidden_size = self._get_hidden_size(target_model.config)
+        self.draft_hidden_size = self._get_hidden_size(draft_model.config)
+
         if manual_place_head:
-            self.ensemble_head = EnsembleHead(target_model.config.hidden_size, draft_model.config.hidden_size).to(self.draft_model.device)
+            self.ensemble_head = EnsembleHead(self.target_hidden_size, self.draft_hidden_size).to(self.draft_model.device)
             self.ensemble_head.device = self.draft_model.device
         else:
-            self.ensemble_head = EnsembleHead(target_model.config.hidden_size, draft_model.config.hidden_size)
+            self.ensemble_head = EnsembleHead(self.target_hidden_size, self.draft_hidden_size)
 
         self.generation_config = target_model.generation_config
         self.config = target_model.config
         self.main_input_name = target_model.main_input_name
         self._supports_cache_class = target_model._supports_cache_class
         self.device = target_model.device
+        self.dtype = target_model.dtype
+
+        self.tp_size = getattr(target_model, "tp_size", getattr(draft_model, "tp_size", 1))
+
+        self._supports_static_cache = getattr(
+            target_model, "_supports_static_cache", False
+        )
+
+        self.base_model_prefix = getattr(target_model, "base_model_prefix", "model")
+
 
         self._target_past_key_values = None
         self._draft_past_key_values = None
+
+    # ---- NEW: let HF’s compile path ask us for a compiled call ----
+    # Added by Ziyi
+    def get_compiled_call(self, compile_config):
+        # If the inner model knows how to compile, use it; else opt out by returning None.
+        inner = getattr(self.target_model, "get_compiled_call", None)
+        return inner(compile_config) if callable(inner) else None
+
+    def _get_hidden_size(self, cfg):
+        if hasattr(cfg, "text_config") and hasattr(cfg.text_config, "hidden_size"):
+            return cfg.text_config.hidden_size
+        # Common HF models (Llama, Qwen, etc.)
+        if hasattr(cfg, "hidden_size"):
+            return cfg.hidden_size
+
 
     def reset_cache(self):
         self._target_past_key_values = None

@@ -550,7 +550,7 @@ class AssistedCandidateGeneratorDifferentTokenizers(AssistedCandidateGenerator):
         if self.prev_target_ids_len >= new_target_ids.shape[1]:
             return input_ids, None
 
-        return new_target_ids, None
+        return new_target_ids, None, None
 
     def _prepare_assistant_input_ids(self, input_ids: torch.LongTensor) -> tuple[torch.LongTensor, int]:
         """Converts target input IDs to assistant input IDs, handling discrepancies."""
@@ -975,7 +975,7 @@ class UniversalSpeculativeDecodingGenerator(AssistedCandidateGeneratorDifferentT
         self._target_seq_len_with_candidates = target_candidate_ids.shape[-1]
         target_candidate_logits = self._atm_translator.get_target_logits(assistant_candidate_logits)
 
-        return target_candidate_ids, target_candidate_logits
+        return target_candidate_ids, target_candidate_logits, None
 
     def _update_past_and_masks(self, assistant_input_ids: torch.LongTensor, num_added_tokens: int = 1) -> bool:
         if self._prev_assistant_ids is None:
