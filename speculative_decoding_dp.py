@@ -32,6 +32,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+def get_hidden_size(cfg):
+    if hasattr(cfg, "text_config") and hasattr(cfg.text_config, "hidden_size"):
+        return cfg.text_config.hidden_size
+    # Common HF models (Llama, Qwen, etc.)
+    if hasattr(cfg, "hidden_size"):
+        return cfg.hidden_size
+
+
 def cnndm_find_answer(text):
     return re.split("\n\nArticle:", text)[0].strip()
 
@@ -138,7 +147,18 @@ def main(args):
             draft_model.generation_config.temperature = args.temperature
             draft_model.generation_config.is_assistant=True
             draft_model.generation_config.num_assistant_tokens=args.num_assistant_tokens
-            ensemble_head = EnsembleHead(target_hidden_size=model.config.hidden_size, draft_hidden_size=draft_model.config.hidden_size)
+            
+
+            if args.assistant_schedule != 'dynamic':
+                print("Debuging the assitant schedule: ", args.assistant_schedule)
+                draft_model.generation_config.num_assistant_tokens_schedule = args.assistant_schedule
+                draft_model.generation_config.assistant_confidence_threshold = args.assistant_confidence_threshold
+                draft_model.generation_config.min_length=int(1)
+
+            target_hidden_size = get_hidden_size(model.config)
+            draft_hidden_size = get_hidden_size(draft_model.config)
+
+            ensemble_head = EnsembleHead(target_hidden_size=target_hidden_size, draft_hidden_size=draft_hidden_size)
             head_path = os.path.join(args.model_path, "ensemble_head.bin")
             print(f"Loading Ensemblemodel and tokenizer from {args.model_path}")
             ensemble_head.load_state_dict(torch.load(head_path))
@@ -275,6 +295,7 @@ def main(args):
                 torch.cuda.empty_cache()
                 
                 with torch.no_grad():
+                    print("Debug the generation schedule: ", )
                     start_time = time.time()
                     output_ids = model.generate(
                         input_ids,
@@ -304,7 +325,7 @@ def main(args):
                 all_completions.extend(generations)
                 all_labels.extend(labels)
 
-                if args.dataset == 'cnndm' or args.dataset == 'xum':
+                if args.dataset == 'cnndm' or args.dataset == 'xsum':
                     rouge = evaluate.load('rouge')
                 elif args.dataset == 'wmt':
                     all_bleu = []

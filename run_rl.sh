@@ -2,13 +2,18 @@
 
 OPTIMIZER=AdamW
 LR=5e-4
-DATA=wmt
+# DATA=wmt
+DATA=xsum
 LOSS=reinforce
 MODEL=gemma # llama
+# MODEL=llama
 EPOCH=2
 LAMBDA=10
 TARGET_DRAFT_W=0.5
 CLASS=google # meta-llama
+# CLASS=meta-llama
+# DRAFT_MODEL=Llama-3.2-1B-Instruct
+# TARGET_MODEL=Llama-3.1-8B-Instruct
 DRAFT_MODEL=gemma-3-4b-it # Llama-3.2-1B-Instruct
 TARGET_MODEL=gemma-3-12b-it # Llama-3.1-8B-Instruct
 TEMP=0.0
@@ -32,7 +37,7 @@ huggingface-cli login --token $HF_TOKEN
     # model.max_tokens=128 \ generation alone 
 
 python rl_train.py loss=$LOSS model=$MODEL datasets=[$DATA] optimizer=$OPTIMIZER \
-    exp_name=${TARGET_MODEL}_${DRAFT_MODEL}_13Aug_TEMP${TEMP}_${LOSS}_${OPTIMIZER}_reg_scale${LAMBDA}_target${TARGET_DRAFT_W}_${LR} \
+    exp_name=${TARGET_MODEL}_${DRAFT_MODEL}_15Aug_TEMP${TEMP}_${LOSS}_${OPTIMIZER}_reg_scale${LAMBDA}_target${TARGET_DRAFT_W}_${LR} \
     lr=${LR} \
     global_epochs=$EPOCH \
     n_examples=400 \

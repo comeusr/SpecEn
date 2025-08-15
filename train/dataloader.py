@@ -668,7 +668,9 @@ def get_wmt(split: str, n_examples: Optional[int] = None) -> Dataset:
     return data
 
 
-        
+def get_mbpp(split: str, n_example: Optional[int] = None) -> Dataset:
+    pass
+
 
 def get_gsm8k(split: str, n_examples: Optional[int] = None) -> Dataset:
     rank0_print(f'Loading GSM8K dataset ({split} split) from Huggingface...')

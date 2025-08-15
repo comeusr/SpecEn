@@ -69,6 +69,23 @@ def cnndm_reward_func(completions, ground_truth):
     
     return results
 
+
+#added by kasasiva
+def xsum_find_answer(text):
+    return re.split("\n\nDocument:", text)[0]
+    
+def xsum_reward_func(completions, ground_truth):
+
+    rouge = evaluate.load("rouge")
+    
+    results = []
+    for completion, gt in zip(completions, ground_truth):
+        completion = xsum_find_answer(completion)
+        results.append(rouge.compute(predictions=[completion], references=[gt])['rouge2'])
+    
+    return results
+
+
 @hydra.main(version_base=None, config_path="train_config", config_name="config")
 def main(config: DictConfig):
 
@@ -140,6 +157,8 @@ def main(config: DictConfig):
     )
 
     device0 = torch.device("cuda:0")
+
+    print("Debuging the attention implementation: ", config.model.attn_implementation)
 
     target_model = AutoModelForCausalLM.from_pretrained(config.model.target_name_or_path, 
                                                   torch_dtype=torch.bfloat16, 

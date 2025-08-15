@@ -289,6 +289,12 @@ class EnsembleWrapper(nn.Module, GenerationMixin):
         else:
             self.ensemble_head = EnsembleHead(self.target_hidden_size, self.draft_hidden_size)
 
+        
+        # CHANGE: prevent base-model bypass; keep prefix but point it back to self
+        self.base_model_prefix = getattr(target_model, "base_model_prefix", "model")         
+        if self.base_model_prefix == "model":                                                 
+            self.model = self  # so getattr(self, "model", self) returns the WRAPPER  
+
         self.generation_config = target_model.generation_config
         self.config = target_model.config
         self.main_input_name = target_model.main_input_name
@@ -302,18 +308,13 @@ class EnsembleWrapper(nn.Module, GenerationMixin):
             target_model, "_supports_static_cache", False
         )
 
-        self.base_model_prefix = getattr(target_model, "base_model_prefix", "model")
-
-
         self._target_past_key_values = None
         self._draft_past_key_values = None
 
     # ---- NEW: let HF’s compile path ask us for a compiled call ----
     # Added by Ziyi
     def get_compiled_call(self, compile_config):
-        # If the inner model knows how to compile, use it; else opt out by returning None.
-        inner = getattr(self.target_model, "get_compiled_call", None)
-        return inner(compile_config) if callable(inner) else None
+          return self.forward
 
     def _get_hidden_size(self, cfg):
         if hasattr(cfg, "text_config") and hasattr(cfg.text_config, "hidden_size"):
@@ -337,6 +338,7 @@ class EnsembleWrapper(nn.Module, GenerationMixin):
         log_ensemble_weights=False,
         **kwargs,
     ):
+
         with torch.no_grad():
             draft_output = self.draft_model(input_ids=input_ids.to(self.draft_model.device), 
                                             past_key_values=self._draft_past_key_values, 

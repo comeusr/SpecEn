@@ -28,25 +28,28 @@ declare -A MODEL_PAIRS=(
 DRAFT_LENGTHS=(3 5 7 9 11 13 15)
 
 # Fixed parameters (same as run_sd_kasasiva.sh)
-METHOD=sd
-# METHOD=sd_en # for trained_rl_head
-CLASS=google
+# METHOD=sd
+METHOD=sd_en # for trained_rl_head
+# CLASS=google
 # Added by Ziyi, for testing purpose 
-# CLASS=meta-llama
+CLASS=meta-llama
 STATIC_EW=0.0
 TEMPERATURE=0.2
 ITER=264
-N_EXAMPLES=500
-DO_SAMPLE=True
-DATASET="wmt"  # Focus on WMT dataset only
-SPLIT="validation" # for wmt it has bee to validation
+N_EXAMPLES=200
+DO_SAMPLE=False
+# DATASET="wmt"  # Focus on WMT dataset only
+DATASET="xsum"  # Focus on XSUM dataset only
+# SPLIT="validation" # for wmt it has bee to validation
+SPLIT="test" # for xsum it has bee to test
 BATCH_SIZE=8    # Batch size per GPU
 MAX_TOKENS=128  # Maximum tokens to generate
 SEED=42
 ASSISTANT_SCHEDULE='constant' # Options: dynamic, constant, heuristic
 ASSISTANT_CONFIDENT_THRESHOLD=0
 
-# Authentication setup (same as kasasiva)
+
+
 # Load environment variables from .env file
 if [ -f .env ]; then
   export $(grep -v '^#' .env | xargs)
@@ -70,7 +73,9 @@ for TARGET in "${!MODEL_PAIRS[@]}"; do
         echo "Processing dataset: $DATASET with target: $TARGET, draft: $DRAFT, draft length: $NUM_DRAFT using $NUM_GPUS GPUs"
         
         # Set model path (same structure as kasasiva)
-        MODEL_PATH="../data/${DATASET}/model/${TARGET}_${DRAFT}_sd_13Aug_ksr_NUM_EXMPLS${N_EXAMPLES}_TEMP${TEMPERATURE}_DO_SAMPLe${DO_SAMPLE}/"
+        # MODEL_PATH="../data/${DATASET}/model/${TARGET}_${DRAFT}_sd_13Aug_ksr_NUM_EXMPLS${N_EXAMPLES}_TEMP${TEMPERATURE}_DO_SAMPLe${DO_SAMPLE}/"
+        MODEL_PATH="../data/xsum/model/Llama-3.1-8B-Instruct_Llama-3.2-1B-Instruct_13Aug_TEMP0.0_reinforce_AdamW_reg_scale10_target0.5_5e-4/FINAL/"
+        # /data/xsum/model/Llama-3.1-8B-Instruct_Llama-3.2-1B-Instruct_13Aug_TEMP0.0_reinforce_AdamW_reg_scale10_target0.5_5e-4/FINAL
         
         # Create the output directory if it doesn't exist
         mkdir -p $MODEL_PATH

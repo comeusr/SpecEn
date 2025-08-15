@@ -18,15 +18,15 @@ echo "Running with $NUM_GPUS GPUs"
 # Set common parameters
 TARGET_MODEL='google/gemma-2-9b-it' # 'google/gemma-2-9b-it' # "meta-llama/Llama-3.2-3B-Instruct"
 DRAFT_MODEL='google/gemma-2-2b-it' # 'google/gemma-2-2b-it' # "meta-llama/Llama-3.2-1B-Instruct"
-METHOD="sd"  # Options: sd, sd_en, static_en
+METHOD="static_en"  # Options: sd, sd_en, static_en
 DATASET="cnndm"  # Options: gsm8k, cnndm, xsum
 SPLIT="test"
-N_EXAMPLES=200  # Number of examples to process
+N_EXAMPLES=16  # Number of examples to process
 BATCH_SIZE=8    # Batch size per GPU
 MAX_TOKENS=256  # Maximum tokens to generate
 TEMPERATURE=0.2
 DO_SAMPLE="False"
-NUM_ASSISTANT_TOKENS=15
+NUM_ASSISTANT_TOKENS=10
 ASSISTANT_SCHEDULE='constant' # Options: dynamic, constant, heuristic
 ASSISTANT_CONFIDENT_THRESHOLD=0
 SEED=42

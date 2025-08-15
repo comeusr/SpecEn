@@ -921,6 +921,8 @@ class ReinforceTrainer:
         target = [answer[0]['content'] for answer in batch['target']]
 
         self.model.eval()
+        # print('Debug print out the input_ids: ', input_ids)
+        # print('Debug print out the original prompt: ', batch['original_prompt_text'])
         with torch.no_grad():
             output_ids = self.model.generate(
                 input_ids,
@@ -937,9 +939,10 @@ class ReinforceTrainer:
         reply_ids = output_ids[:, input_ids.shape[-1]:]
         generations = self.tokenizer.batch_decode(reply_ids, skip_special_tokens=True)
 
+        # print("Debug print out the generations: ", generations)
+
         with torch.no_grad():
             rewards = torch.Tensor(self.reward_fn(generations, target))
-
 
         # 3. Get logits from model to compute log-probs
         self.model.train()
@@ -1041,7 +1044,7 @@ class ReinforceTrainer:
         return loss, metric
 
 
-    def compute_total_loss(reward_loss: torch.Tensor, regularization_loss: float, eps=1e-8):
+    def compute_total_loss(self, reward_loss: torch.Tensor, regularization_loss: float, eps=1e-8):
         # Detach reward_loss to safely get its scalar value
         reward_value = torch.abs(reward_loss.detach().item())
         reg_value = regularization_loss.detach()
@@ -1127,6 +1130,9 @@ class ReinforceTrainer:
                         )
 
                 delete_dicts(batch, metrics)
+
+                # Added by Ziyi for debuging usage
+                # break
 
 
     def save(self, output_dir: Optional[str] = None, metrics: Optional[Dict] = {}, final_save=True):
