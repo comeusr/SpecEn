@@ -1,0 +1,11 @@
+{
+  "performance": {
+    "rouge1": 0.0,
+    "rouge2": 0.0,
+    "rougeL": 0.0,
+    "rougeLsum": 0.0
+  },
+  "num_tokens_per_sec": 1.0040592923760414,
+  "total_time": 1.0843786150217056,
+  "num_tokens": 1.0
+}

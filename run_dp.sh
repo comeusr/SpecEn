@@ -18,6 +18,9 @@ echo "Running with $NUM_GPUS GPUs"
 # Set common parameters
 TARGET_MODEL='google/gemma-2-9b-it' # 'google/gemma-2-9b-it' # "meta-llama/Llama-3.2-3B-Instruct"
 DRAFT_MODEL='google/gemma-2-2b-it' # 'google/gemma-2-2b-it' # "meta-llama/Llama-3.2-1B-Instruct"
+# TARGET_MODEL="meta-llama/Llama-3.1-8B-Instruct"
+# DRAFT_MODEL="meta-llama/Llama-3.2-1B-Instruct"
+
 METHOD="static_en"  # Options: sd, sd_en, static_en
 DATASET="cnndm"  # Options: gsm8k, cnndm, xsum
 SPLIT="test"
@@ -49,7 +52,6 @@ torchrun --nproc_per_node=$NUM_GPUS \
     --max_tokens $MAX_TOKENS \
     --temperature $TEMPERATURE \
     --do_sample $DO_SAMPLE \
-    --draft_len $NUM_ASSISTANT_TOKENS \
     --num_assistant_tokens $NUM_ASSISTANT_TOKENS \
     --seed $SEED \
     --model_path $MODEL_PATH \

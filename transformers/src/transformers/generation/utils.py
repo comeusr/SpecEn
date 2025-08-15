@@ -4846,8 +4846,8 @@ class GenerationMixin(ContinuousMixin):
         generation_config: GenerationConfig,
         synced_gpus: bool,
         streamer: Optional["BaseStreamer"],
-        ensemble_head: Optional[nn.Module] = None,
-        static_ensemble_draft_weight: Optional[float] = None,
+        ensemble_head: Optional[nn.Module] = None, # Added by Ziyi 
+        static_ensemble_draft_weight: Optional[float] = None, # Added by Ziyi
         **model_kwargs,
     ) -> Union[GenerateNonBeamOutput, torch.LongTensor]:
         r"""
@@ -4929,6 +4929,9 @@ class GenerationMixin(ContinuousMixin):
 
             #  1. Fetch candidate sequences from a `CandidateGenerator` and move to the correct device
             candidate_input_ids, candidate_logits, draft_candidates_hidden_states = candidate_generator.get_candidates(input_ids)
+
+            # Added by Ziyi:
+            print("Debug the raw candidates logits: ", candidate_logits)
             
             candidate_input_ids = candidate_input_ids.to(self.device)
             if candidate_logits is not None:
@@ -5002,10 +5005,25 @@ class GenerationMixin(ContinuousMixin):
                     logits = torch.cat([logits, outputs.logits[:,-1,:].unsqueeze(dim=1)], dim=1).contiguous()
             
                 elif static_ensemble_draft_weight is not None:
-                
+
+                    # print("Debug the static ensemble draft weight: ", static_ensemble_draft_weight)
+
+
                     target_logits = outputs.logits[:,-candidate_length-1:-1,:]
+                    # print('Debug partial target logits: ', target_logits)
                     logits = candidate_logits * static_ensemble_draft_weight + target_logits * (1-static_ensemble_draft_weight)
+                    # print('Debug candidates logits: ', candidate_logits)
+                    # print('Debug partial zero ensemble logits: ', logits)
+                    # if logits.isnan().any():
+                    #     print("Candidates contain inf: ", torch.isinf(candidate_logits).any().item())
+                    #     inf_mask = torch.isinf(candidate_logits)
+                    #     inf_idx  = torch.nonzero(inf_mask, as_tuple=False)  # (N, x.ndim) indices
+                    #     print("Inf position: ", inf_idx)
+                    
                     logits = torch.cat([logits, outputs.logits[:,-1,:].unsqueeze(dim=1)], dim=1).contiguous()
+                    # print('Debug the zero ensemble logits: ', logits)
+                    
+                    # print('Debug the original logits: ', outputs.logits)
                 else:
                     
                     logits = outputs.logits
